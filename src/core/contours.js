@@ -44,31 +44,63 @@ export function buildCircleContour(radius, segmentCount) {
   });
 }
 
-export function clockwiseParameters(points, startIndex = 0) {
-  const ordered = [];
-  for (let offset = 0; offset < points.length; offset += 1) {
-    ordered.push((startIndex + offset) % points.length);
+/** Marks closer than this (radians) are treated as the same vertex. */
+const MARK_MERGE_ANGLE = 1e-9;
+
+/**
+ * Build a clockwise circle that has a vertex at every marked angle.
+ *
+ * Angles are clockwise from +Y, as in buildCircleContour. The loop always
+ * starts at +Y (angle 0 is an implicit mark). Each gap between neighbouring
+ * marks is split evenly so that no segment spans more than 2π/segmentCount;
+ * with no marks the result equals buildCircleContour(radius, segmentCount).
+ *
+ * Returns the points and, for every requested mark, the index of its vertex.
+ */
+export function buildMarkedCircle(radius, segmentCount, markAngles = []) {
+  const fullTurn = 2 * Math.PI;
+  const wrap = (angle) => ((angle % fullTurn) + fullTurn) % fullTurn;
+  const requested = markAngles.map(wrap);
+
+  const marks = [];
+  for (const angle of [0, ...requested].sort((a, b) => a - b)) {
+    const last = marks.length ? marks[marks.length - 1] : null;
+    if (last !== null && angle - last < MARK_MERGE_ANGLE) continue;
+    if (fullTurn - angle < MARK_MERGE_ANGLE) continue; // same vertex as the start at 0
+    marks.push(angle);
   }
 
-  const parameters = [0];
-  let previous = clockwiseAngle(points[ordered[0]]);
-  for (let offset = 1; offset < ordered.length; offset += 1) {
-    let current = clockwiseAngle(points[ordered[offset]]);
-    while (current < previous - 1e-12) current += 2 * Math.PI;
-    parameters.push(current);
-    previous = current;
-  }
+  const maxStep = fullTurn / segmentCount;
+  const points = [];
+  const markVertex = [];
+  marks.forEach((start, index) => {
+    const end = index + 1 < marks.length ? marks[index + 1] : fullTurn;
+    // the small bias keeps an exact multiple of maxStep from gaining a segment
+    const steps = Math.max(1, Math.ceil((end - start) / maxStep - 1e-9));
+    markVertex.push(points.length);
+    for (let step = 0; step < steps; step += 1) {
+      const angle = start + (end - start) * step / steps;
+      points.push([radius * Math.sin(angle), radius * Math.cos(angle)]);
+    }
+  });
 
-  const initialAngle = clockwiseAngle(points[ordered[0]]);
-  for (let index = 0; index < parameters.length; index += 1) {
-    parameters[index] -= initialAngle;
-    if (parameters[index] < -1e-12) parameters[index] += 2 * Math.PI;
-  }
-  return { ordered, parameters };
+  const markIndices = requested.map((angle) => {
+    let nearest = 0;
+    let nearestDistance = Infinity;
+    marks.forEach((mark, index) => {
+      const difference = Math.abs(mark - angle);
+      const distance = Math.min(difference, fullTurn - difference);
+      if (distance < nearestDistance) {
+        nearest = index;
+        nearestDistance = distance;
+      }
+    });
+    return markVertex[nearest];
+  });
+  return { points, markIndices };
 }
 
-function clockwiseAngle([x, y]) {
-  let angle = Math.atan2(x, y);
-  if (angle < 0) angle += 2 * Math.PI;
-  return angle;
+/** Rotate a closed contour so that it starts at startIndex. */
+export function rotateContour(points, startIndex) {
+  return points.map((_, offset) => points[(startIndex + offset) % points.length]);
 }

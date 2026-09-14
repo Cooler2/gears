@@ -1,218 +1,90 @@
-import {
-  buildCircleContour,
-  buildGt2Contour,
-  circleSegmentCount,
-  clockwiseParameters
-} from "./contours.js";
+import { buildGt2Contour, buildMarkedCircle, circleSegmentCount, rotateContour } from "./contours.js";
+import { createMeshBuilder, isSimplePolygon, MeshBuildError } from "./mesh-builder.js";
+import { layoutSpokes } from "./spokes.js";
 
-export function buildSolidPulleyMesh(description, derived) {
-  const vertices = [];
-  const indices = [];
-  const loopCache = new Map();
-  const circleSegments = new Map();
-  const halfWidth = description.rim.toothedWidth / 2;
-  const lowerZ = -halfWidth;
-  const upperZ = halfWidth;
-  const { boreRadius, hubRadius, rimInnerRadius, webLowerZ, webUpperZ, outsideRadius } = derived;
-  const error = description.generation.maxChordError;
+const MAX_LOOP_SEGMENTS = 4096;
+const MAX_TRIANGLES = 200000;
+/** Index of the first groove centre in buildGt2Contour: it lies on the +Y ray. */
+const PROFILE_START = 9;
 
-  for (const radius of [boreRadius, hubRadius]) {
-    const count = circleSegmentCount(radius, error);
-    if (count > 4096) return complexityFailure();
-    circleSegments.set(radius, count);
-  }
-  const rimMinimum = circleSegmentCount(rimInnerRadius, error);
-  // Two aligned vertices per tooth: one at a groove centre and one at the
-  // opposite inter-groove tip. N tip-aligned vertices are sufficient for this
-  // profile; 2N gives cleaner, symmetric cap triangles.
-  const rimAngularPeriod = 2 * description.rim.toothCount;
-  const rimSegments = Math.ceil(rimMinimum / rimAngularPeriod) * rimAngularPeriod;
-  if (rimSegments > 4096) return complexityFailure();
-  circleSegments.set(rimInnerRadius, rimSegments);
-  // Flange circles share the half-pitch phase used by the rim.
-  for (const flange of [description.flanges.lower, description.flanges.upper]) {
-    if (!flange) continue;
-    const radius = outsideRadius + flange.radialExtension;
-    const count = Math.ceil(circleSegmentCount(radius, error) / rimAngularPeriod) * rimAngularPeriod;
-    if (count > 4096) return complexityFailure();
-    circleSegments.set(radius, count);
-  }
+/**
+ * Build the closed boundary of the pulley.
+ *
+ * Every surface is either a vertical wall between two copies of one XY contour
+ * or a flat face at one Z level (see mesh-builder.js). From the axis outwards
+ * the contours are: bore R_b, hub R_h, rim inner circle R_i, tooth profile and
+ * the flange edges R_o + E_f. Axially the rim spans [−W/2, +W/2], flanges add
+ * their thickness outside it, the hub spans [hubLowerZ, hubUpperZ] and the web
+ * [webLowerZ, webUpperZ]. Between the web levels the hub cylinder and the rim
+ * inner surface are covered by the web; with spokes they stay exposed inside
+ * the windows, whose walls are built from the same loop vertices.
+ */
+export function buildPulleyMesh(description, derived) {
+  const { rim, flanges, web } = description;
+  const { boreRadius, hubRadius, rimInnerRadius, outsideRadius, webLowerZ, webUpperZ, hubLowerZ, hubUpperZ } = derived;
+  const maxChordError = description.generation.maxChordError;
+  const rimLowerZ = -rim.toothedWidth / 2;
+  const rimUpperZ = rim.toothedWidth / 2;
+  // outer limits of the belt part: flange far faces or rim ends
+  const shellLowerZ = flanges.lower ? rimLowerZ - flanges.lower.axialThickness : rimLowerZ;
+  const shellUpperZ = flanges.upper ? rimUpperZ + flanges.upper.axialThickness : rimUpperZ;
 
-  const profilePoints = buildGt2Contour(description.rim.toothCount, outsideRadius);
-  const profileStart = 9;
+  // Rim-side circles get a vertex at every groove centre and every tip between
+  // grooves, so caps against the concave profile always triangulate.
+  const halfPitchAngles = Array.from({ length: 2 * rim.toothCount }, (_, index) => index * Math.PI / rim.toothCount);
+  const layout = web.type === "spokes" ? layoutSpokes({
+    count: web.count,
+    width: web.width,
+    filletRadius: web.filletRadius,
+    hubRadius,
+    rimRadius: rimInnerRadius,
+    maxChordError
+  }) : null;
+  // spoke k uses hub marks 3k..3k+2 and rim marks 4k..4k+3 (after the half-pitch marks)
+  const hubMarks = layout ? layout.spokes.flatMap(({ axisAngle }) => [
+    axisAngle - layout.hubTangentAngle,
+    axisAngle,
+    axisAngle + layout.hubTangentAngle
+  ]) : [];
+  const rimSpokeMarks = layout ? layout.spokes.flatMap(({ axisAngle }) => [
+    axisAngle - layout.rimTangentAngle,
+    axisAngle - layout.rimGuardAngle,
+    axisAngle + layout.rimGuardAngle,
+    axisAngle + layout.rimTangentAngle
+  ]) : [];
 
-  const circle = (radius, z) => {
-    const key = `c:${radius}:${z}`;
-    if (!loopCache.has(key)) {
-      loopCache.set(key, addLoop(buildCircleContour(radius, circleSegments.get(radius)), z, 0));
-    }
-    return loopCache.get(key);
+  const circle = (radius, marks) => buildMarkedCircle(radius, circleSegmentCount(radius, maxChordError), marks);
+  const flangeEdge = (flange) => flange ? circle(outsideRadius + flange.radialExtension, halfPitchAngles) : null;
+  const contours = {
+    bore: circle(boreRadius, []),
+    hub: circle(hubRadius, hubMarks),
+    rimInner: circle(rimInnerRadius, [...halfPitchAngles, ...rimSpokeMarks]),
+    profile: { points: rotateContour(buildGt2Contour(rim.toothCount, outsideRadius), PROFILE_START) },
+    lowerFlange: flangeEdge(flanges.lower),
+    upperFlange: flangeEdge(flanges.upper)
   };
-  const profile = (z) => {
-    const key = `p:${z}`;
-    if (!loopCache.has(key)) loopCache.set(key, addLoop(profilePoints, z, profileStart));
-    return loopCache.get(key);
+  const circles = [contours.bore, contours.hub, contours.rimInner, contours.lowerFlange, contours.upperFlange];
+  if (circles.some((contour) => contour && contour.points.length > MAX_LOOP_SEGMENTS)) return complexityFailure();
+
+  const mesh = createMeshBuilder();
+  const loops = new Map();
+  /** The loop of a contour at height z, created on first use and then shared. */
+  const loop = (contour, z) => {
+    if (!loops.has(contour)) loops.set(contour, new Map());
+    const levels = loops.get(contour);
+    if (!levels.has(z)) levels.set(z, mesh.addPoints(contour.points, z));
+    return levels.get(z);
   };
-  function addLoop(points, z, startIndex) {
-    const ids = points.map(([x, y]) => {
-      const index = vertices.length / 3;
-      vertices.push(x, y, z);
-      return index;
-    });
-    const order = clockwiseParameters(points, startIndex);
-    return {
-      ids: order.ordered.map((index) => ids[index]),
-      parameters: order.parameters,
-      points: order.ordered.map((index) => points[index])
-    };
-  }
 
-  const { hubLowerZ, hubUpperZ } = derived;
-  const boreLower = circle(boreRadius, hubLowerZ);
-  const boreUpper = circle(boreRadius, hubUpperZ);
-  const hubLower = circle(hubRadius, hubLowerZ);
-  const hubUpper = circle(hubRadius, hubUpperZ);
-  const rimLower = circle(rimInnerRadius, lowerZ);
-  const rimUpper = circle(rimInnerRadius, upperZ);
-  const outerLower = profile(lowerZ);
-  const outerUpper = profile(upperZ);
-  const hubWebLower = circle(hubRadius, webLowerZ);
-  const hubWebUpper = circle(hubRadius, webUpperZ);
-  const rimWebLower = circle(rimInnerRadius, webLowerZ);
-  const rimWebUpper = circle(rimInnerRadius, webUpperZ);
+  addHub();
+  addRim();
+  addFlange("lower");
+  addFlange("upper");
+  if (layout) addSpokes();
+  else addSolidWeb();
 
-  // Hub caps follow the extension limits, independently of the rim width.
-  annulus({ inner: boreUpper, outer: hubUpper, normal: "+Z" });
-  annulus({ inner: boreLower, outer: hubLower, normal: "-Z" });
-  wall({ lower: boreLower, upper: boreUpper, normal: "radiallyInward" });
-  wall({ lower: outerLower, upper: outerUpper, normal: "radiallyOutward" });
-
-  const lowerShellZ = addFlange({ side: "lower", flange: description.flanges.lower, rimZ: lowerZ, rimProfile: outerLower });
-  const upperShellZ = addFlange({ side: "upper", flange: description.flanges.upper, rimZ: upperZ, rimProfile: outerUpper });
-  if (!description.flanges.lower) annulus({ inner: rimLower, outer: outerLower, normal: "-Z" });
-  if (!description.flanges.upper) annulus({ inner: rimUpper, outer: outerUpper, normal: "+Z" });
-
-  annulus({ inner: hubWebUpper, outer: rimWebUpper, normal: "+Z" });
-  annulus({ inner: hubWebLower, outer: rimWebLower, normal: "-Z" });
-  if (hubLowerZ < webLowerZ) wall({ lower: hubLower, upper: hubWebLower, normal: "radiallyOutward" });
-  if (webUpperZ < hubUpperZ) wall({ lower: hubWebUpper, upper: hubUpper, normal: "radiallyOutward" });
-  if (lowerShellZ < webLowerZ) wall({ lower: circle(rimInnerRadius, lowerShellZ), upper: rimWebLower, normal: "radiallyInward" });
-  if (webUpperZ < upperShellZ) wall({ lower: rimWebUpper, upper: circle(rimInnerRadius, upperShellZ), normal: "radiallyInward" });
-
-  /**
-   * Add one axial flange. At the rim interface only the ledge outside the
-   * tooth profile is exposed; the overlapping rim area is internal.
-   */
-  function addFlange({ side, flange, rimZ, rimProfile }) {
-    if (!flange) return rimZ;
-    const upper = side === "upper";
-    const farZ = rimZ + (upper ? flange.axialThickness : -flange.axialThickness);
-    const radius = outsideRadius + flange.radialExtension;
-    const rimOuter = circle(radius, rimZ);
-    const farOuter = circle(radius, farZ);
-    const farInner = circle(rimInnerRadius, farZ);
-    annulus({ inner: rimProfile, outer: rimOuter, normal: upper ? "-Z" : "+Z" });
-    annulus({ inner: farInner, outer: farOuter, normal: upper ? "+Z" : "-Z" });
-    wall({ lower: upper ? rimOuter : farOuter, upper: upper ? farOuter : rimOuter, normal: "radiallyOutward" });
-    return farZ;
-  }
-
-  function triangle(a, b, c, flip = false) {
-    if (flip) indices.push(a, c, b);
-    else indices.push(a, b, c);
-  }
-
-  /** Connect matching clockwise contours through Z; normal names the exposed radial side. */
-  function wall({ lower, upper, normal }) {
-    const count = lower.ids.length;
-    if (upper.ids.length !== count) throw new Error("Wall loops must have equal vertex counts");
-    for (let index = 0; index < count; index += 1) {
-      const next = (index + 1) % count;
-      if (normal === "radiallyOutward") {
-        triangle(lower.ids[index], upper.ids[index], upper.ids[next]);
-        triangle(lower.ids[index], upper.ids[next], lower.ids[next]);
-      } else {
-        triangle(lower.ids[index], lower.ids[next], upper.ids[next]);
-        triangle(lower.ids[index], upper.ids[next], upper.ids[index]);
-      }
-    }
-  }
-
-  /**
-   * Fill a planar ring between nested clockwise contours. Counts may differ;
-   * normal explicitly selects the exposed side: +Z or -Z.
-   */
-  function annulus({ inner, outer, normal }) {
-    const innerCount = inner.ids.length;
-    const outerCount = outer.ids.length;
-    const columns = outerCount + 1;
-    const stateCount = (innerCount + 1) * columns;
-    const costs = new Float64Array(stateCount);
-    const parents = new Uint8Array(stateCount);
-    costs.fill(Infinity);
-    costs[0] = 0;
-    const scale = Math.max(
-      ...inner.points.flatMap(([x, y]) => [Math.abs(x), Math.abs(y)]),
-      ...outer.points.flatMap(([x, y]) => [Math.abs(x), Math.abs(y)])
-    );
-    const areaTolerance = Math.max(1e-14, 1e-14 * scale * scale);
-
-    for (let innerIndex = 0; innerIndex <= innerCount; innerIndex += 1) {
-      for (let outerIndex = 0; outerIndex <= outerCount; outerIndex += 1) {
-        const state = innerIndex * columns + outerIndex;
-        if (!Number.isFinite(costs[state])) continue;
-        const innerCurrent = inner.points[innerIndex % innerCount];
-        const outerCurrent = outer.points[outerIndex % outerCount];
-        if (outerIndex < outerCount) {
-          const outerFollowing = outer.points[(outerIndex + 1) % outerCount];
-          if (signedArea2(innerCurrent, outerFollowing, outerCurrent) > areaTolerance) {
-            update(state + 1, costs[state] + distanceSquared(innerCurrent, outerFollowing), 1);
-          }
-        }
-        if (innerIndex < innerCount) {
-          const innerFollowing = inner.points[(innerIndex + 1) % innerCount];
-          if (signedArea2(innerCurrent, innerFollowing, outerCurrent) > areaTolerance) {
-            update(state + columns, costs[state] + distanceSquared(innerFollowing, outerCurrent), 2);
-          }
-        }
-      }
-    }
-
-    let innerIndex = innerCount;
-    let outerIndex = outerCount;
-    const selected = [];
-    while (innerIndex > 0 || outerIndex > 0) {
-      const parent = parents[innerIndex * columns + outerIndex];
-      if (parent === 1) {
-        selected.push([
-          inner.ids[innerIndex % innerCount],
-          outer.ids[outerIndex % outerCount],
-          outer.ids[(outerIndex - 1) % outerCount]
-        ]);
-        outerIndex -= 1;
-      } else if (parent === 2) {
-        selected.push([
-          inner.ids[(innerIndex - 1) % innerCount],
-          inner.ids[innerIndex % innerCount],
-          outer.ids[outerIndex % outerCount]
-        ]);
-        innerIndex -= 1;
-      } else {
-        throw new Error("No consistently oriented annulus triangulation exists for these contours");
-      }
-    }
-    selected.reverse();
-    for (const [a, b, c] of selected) triangle(a, b, c, normal === "-Z");
-
-    function update(destination, cost, parent) {
-      if (cost < costs[destination]) {
-        costs[destination] = cost;
-        parents[destination] = parent;
-      }
-    }
-  }
-
-  if (indices.length / 3 > 200000) return complexityFailure();
+  if (mesh.triangleCount > MAX_TRIANGLES) return complexityFailure();
+  const { vertices, indices } = mesh.finish();
   return {
     ok: true,
     mesh: {
@@ -223,22 +95,133 @@ export function buildSolidPulleyMesh(description, derived) {
       bounds: calculateBounds(vertices)
     },
     contours: {
-      toothVertexCount: profilePoints.length,
+      toothVertexCount: contours.profile.points.length,
       circleSegments: {
-        bore: circleSegments.get(boreRadius),
-        hub: circleSegments.get(hubRadius),
-        rimInner: circleSegments.get(rimInnerRadius)
+        bore: contours.bore.points.length,
+        hub: contours.hub.points.length,
+        rimInner: contours.rimInner.points.length
       }
     }
   };
+
+  /** Bore, hub end rings and the hub cylinder outside the web levels. */
+  function addHub() {
+    const { bore, hub } = contours;
+    mesh.wall({ lower: loop(bore, hubLowerZ), upper: loop(bore, hubUpperZ), normal: "inward" });
+    mesh.annulus({ inner: loop(bore, hubLowerZ), outer: loop(hub, hubLowerZ), normal: "-Z" });
+    mesh.annulus({ inner: loop(bore, hubUpperZ), outer: loop(hub, hubUpperZ), normal: "+Z" });
+    if (hubLowerZ < webLowerZ) mesh.wall({ lower: loop(hub, hubLowerZ), upper: loop(hub, webLowerZ), normal: "outward" });
+    if (webUpperZ < hubUpperZ) mesh.wall({ lower: loop(hub, webUpperZ), upper: loop(hub, hubUpperZ), normal: "outward" });
+  }
+
+  /** Tooth surface, flangeless rim ends and the rim inner surface outside the web levels. */
+  function addRim() {
+    const { rimInner, profile } = contours;
+    mesh.wall({ lower: loop(profile, rimLowerZ), upper: loop(profile, rimUpperZ), normal: "outward" });
+    if (!flanges.lower) mesh.annulus({ inner: loop(rimInner, rimLowerZ), outer: loop(profile, rimLowerZ), normal: "-Z" });
+    if (!flanges.upper) mesh.annulus({ inner: loop(rimInner, rimUpperZ), outer: loop(profile, rimUpperZ), normal: "+Z" });
+    // the inner surface continues through the flanges, which are rings from R_i
+    if (shellLowerZ < webLowerZ) mesh.wall({ lower: loop(rimInner, shellLowerZ), upper: loop(rimInner, webLowerZ), normal: "inward" });
+    if (webUpperZ < shellUpperZ) mesh.wall({ lower: loop(rimInner, webUpperZ), upper: loop(rimInner, shellUpperZ), normal: "inward" });
+  }
+
+  /**
+   * One flange: a ring from R_i to its edge, extruded away from the rim end.
+   * On the rim side only the ledge outside the teeth is exposed; the area under
+   * the teeth is interior material and gets no surface.
+   */
+  function addFlange(side) {
+    if (!flanges[side]) return;
+    const upper = side === "upper";
+    const edge = contours[`${side}Flange`];
+    const rimZ = upper ? rimUpperZ : rimLowerZ;
+    const farZ = upper ? shellUpperZ : shellLowerZ;
+    mesh.annulus({ inner: loop(contours.profile, rimZ), outer: loop(edge, rimZ), normal: upper ? "-Z" : "+Z" });
+    mesh.annulus({ inner: loop(contours.rimInner, farZ), outer: loop(edge, farZ), normal: upper ? "+Z" : "-Z" });
+    mesh.wall({ lower: loop(edge, Math.min(rimZ, farZ)), upper: loop(edge, Math.max(rimZ, farZ)), normal: "outward" });
+  }
+
+  /** A solid web is two flat rings between the hub and the rim inner circle. */
+  function addSolidWeb() {
+    mesh.annulus({ inner: loop(contours.hub, webLowerZ), outer: loop(contours.rimInner, webLowerZ), normal: "-Z" });
+    mesh.annulus({ inner: loop(contours.hub, webUpperZ), outer: loop(contours.rimInner, webUpperZ), normal: "+Z" });
+  }
+
+  /**
+   * Spokes: a flat face for every spoke at both web levels and a vertical wall
+   * around every window between neighbouring spokes.
+   *
+   * Hub and rim loops are split at the fillet tangent points T1 and T4 into
+   * spoke footprints and window arcs. A footprint arc bounds the spoke faces,
+   * a window arc belongs to the window wall; each side chain of a spoke bounds
+   * both its faces and the wall of the adjacent window.
+   */
+  function addSpokes() {
+    const count = layout.spokes.length;
+    const hubIndex = (spoke, side) => contours.hub.markIndices[3 * spoke + (side === "leading" ? 2 : 0)];
+    const rimIndex = (spoke, side) => contours.rimInner.markIndices[halfPitchAngles.length + 4 * spoke + (side === "leading" ? 3 : 0)];
+    const chains = new Map();
+    /** Side chain between T1 and T4, from the hub to the rim, at height z. */
+    const chain = (spoke, side, z) => {
+      const key = `${spoke}:${side}:${z}`;
+      if (!chains.has(key)) chains.set(key, mesh.addPoints(layout.spokes[spoke][side], z));
+      return chains.get(key);
+    };
+
+    /** Counter-clockwise from +Z: hub footprint, leading side, rim footprint back, trailing side down. */
+    const spokeFace = (spoke, z) => joinPath([
+      loopArc(loop(contours.hub, z), hubIndex(spoke, "trailing"), hubIndex(spoke, "leading"), +1),
+      chain(spoke, "leading", z),
+      loopArc(loop(contours.rimInner, z), rimIndex(spoke, "leading"), rimIndex(spoke, "trailing"), -1),
+      reversePath(chain(spoke, "trailing", z))
+    ]);
+    /** Clockwise around window k between spoke k and the next one. */
+    const windowLoop = (spoke, z) => {
+      const following = (spoke + 1) % count;
+      return joinPath([
+        loopArc(loop(contours.rimInner, z), rimIndex(spoke, "leading"), rimIndex(following, "trailing"), +1),
+        reversePath(chain(following, "trailing", z)),
+        loopArc(loop(contours.hub, z), hubIndex(following, "trailing"), hubIndex(spoke, "leading"), -1),
+        chain(spoke, "leading", z)
+      ]);
+    };
+
+    for (let spoke = 0; spoke < count; spoke += 1) {
+      const lowerFace = spokeFace(spoke, webLowerZ);
+      const lowerWindow = windowLoop(spoke, webLowerZ);
+      // both levels share the same XY contour, so checking one level is enough
+      if (!isSimplePolygon(lowerFace.points) || !isSimplePolygon(lowerWindow.points)) {
+        throw new MeshBuildError("E_SELF_INTERSECTION", { rule: "spokeContour", spoke });
+      }
+      mesh.polygon({ loop: lowerFace, normal: "-Z" });
+      mesh.polygon({ loop: spokeFace(spoke, webUpperZ), normal: "+Z" });
+      mesh.wall({ lower: lowerWindow, upper: windowLoop(spoke, webUpperZ), normal: "inward" });
+    }
+  }
 }
 
-function signedArea2(a, b, c) {
-  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+/** Vertices of a loop from index `from` to `to` inclusive, stepping by direction (+1 or −1). */
+function loopArc(loop, from, to, direction) {
+  const count = loop.ids.length;
+  const ids = [];
+  const points = [];
+  for (let index = from; ; index = (index + direction + count) % count) {
+    ids.push(loop.ids[index]);
+    points.push(loop.points[index]);
+    if (index === to) break;
+  }
+  return { ids, points };
 }
 
-function distanceSquared(a, b) {
-  return (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
+function reversePath(path) {
+  return { ids: [...path.ids].reverse(), points: [...path.points].reverse() };
+}
+
+function joinPath(paths) {
+  return {
+    ids: paths.flatMap((path) => path.ids),
+    points: paths.flatMap((path) => path.points)
+  };
 }
 
 export function calculateBounds(vertices) {

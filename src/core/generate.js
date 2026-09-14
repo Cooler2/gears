@@ -1,64 +1,32 @@
 import { diagnostic, validateDescription } from "./parameters.js";
-import { buildSolidPulleyMesh } from "./mesh.js";
+import { buildPulleyMesh } from "./mesh.js";
+import { MeshBuildError } from "./mesh-builder.js";
 import { verifyMesh } from "./verify-mesh.js";
+
+const SPOKE_PATHS = ["/web/count", "/web/width", "/web/filletRadius", "/generation/maxChordError"];
 
 export function generatePulley(input) {
   const result = validateDescription(input);
   if (!result.ok) return result;
 
-  const unsupportedPaths = [];
-  if (result.normalized.web.type !== "solid") unsupportedPaths.push("/web/type");
-  if (unsupportedPaths.length) {
-    return {
-      ...result,
-      ok: false,
-      diagnostics: [...result.diagnostics, diagnostic(
-        "E_STAGE2_UNSUPPORTED",
-        "error",
-        "build",
-        unsupportedPaths,
-        { supportedVariant: "solid web" }
-      )]
-    };
-  }
-
   let built;
   try {
-    built = buildSolidPulleyMesh(result.normalized, result.derived);
-  } catch {
-    return {
-      ...result,
-      ok: false,
-      diagnostics: [...result.diagnostics, diagnostic(
-        "E_BUILD_INTERNAL",
-        "error",
-        "build",
-        [],
-        { rule: "annulusTriangulation" }
-      )]
-    };
+    built = buildPulleyMesh(result.normalized, result.derived);
+  } catch (error) {
+    const known = error instanceof MeshBuildError;
+    const code = known ? error.code : "E_BUILD_INTERNAL";
+    const paths = code === "E_SELF_INTERSECTION" ? SPOKE_PATHS : [];
+    return failed(result, diagnostic(code, "error", "build", paths, known ? error.details : { rule: "unexpected" }));
   }
-  if (!built.ok) {
-    return {
-      ...result,
-      ok: false,
-      diagnostics: [...result.diagnostics, diagnostic(built.code, "error", "build", ["/generation/maxChordError"])]
-    };
-  }
+  if (!built.ok) return failed(result, diagnostic(built.code, "error", "build", ["/generation/maxChordError"]));
 
   const verification = verifyMesh(built.mesh);
   if (!verification.ok) {
     const unique = new Map(verification.errors.map((error) => [error.code, error]));
-    return {
-      ...result,
-      ok: false,
-      diagnostics: [
-        ...result.diagnostics,
-        ...[...unique.values()].map((error) => diagnostic(error.code, "error", "build", [], error.details))
-      ]
-    };
+    return failed(result, ...[...unique.values()].map((error) => diagnostic(error.code, "error", "build", [], error.details)));
   }
 
+  const { normalized, derived } = result;
   return {
     ...result,
     mesh: built.mesh,
@@ -67,25 +35,30 @@ export function generatePulley(input) {
     anchors: {
       axis: { origin: [0, 0, 0], direction: [0, 0, 1] },
       radii: {
-        bore: result.derived.boreRadius,
-        hub: result.derived.hubRadius,
-        rimInner: result.derived.rimInnerRadius,
-        grooveRoot: result.derived.grooveRootRadius,
-        outside: result.derived.outsideRadius,
-        pitch: result.derived.pitchRadius
+        bore: derived.boreRadius,
+        hub: derived.hubRadius,
+        rimInner: derived.rimInnerRadius,
+        grooveRoot: derived.grooveRootRadius,
+        outside: derived.outsideRadius,
+        pitch: derived.pitchRadius
       },
       zLevels: {
-        lowerHub: result.derived.hubLowerZ,
-        lowerFlange: -result.normalized.rim.toothedWidth / 2,
-        rimLower: -result.normalized.rim.toothedWidth / 2,
-        webLower: result.derived.webLowerZ,
-        webUpper: result.derived.webUpperZ,
-        rimUpper: result.normalized.rim.toothedWidth / 2,
-        upperFlange: result.normalized.rim.toothedWidth / 2,
-        upperHub: result.derived.hubUpperZ
+        lowerHub: derived.hubLowerZ,
+        // far face of the flange, null without it
+        lowerFlange: normalized.flanges.lower ? -normalized.rim.toothedWidth / 2 - normalized.flanges.lower.axialThickness : null,
+        rimLower: -normalized.rim.toothedWidth / 2,
+        webLower: derived.webLowerZ,
+        webUpper: derived.webUpperZ,
+        rimUpper: normalized.rim.toothedWidth / 2,
+        upperFlange: normalized.flanges.upper ? normalized.rim.toothedWidth / 2 + normalized.flanges.upper.axialThickness : null,
+        upperHub: derived.hubUpperZ
       }
     }
   };
+}
+
+function failed(result, ...diagnostics) {
+  return { ...result, ok: false, diagnostics: [...result.diagnostics, ...diagnostics] };
 }
 
 export { validateDescription } from "./parameters.js";

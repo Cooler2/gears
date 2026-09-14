@@ -179,11 +179,13 @@ test("flanges and independent hub extensions build one closed solid", async () =
   assert.deepEqual(result.verification.errors, []);
 });
 
-test("spokes remain unavailable until their shared-boundary implementation is complete", async () => {
-  const input = await readJson("../examples/valid/spokes-flanged.json");
-  const result = generatePulley(input);
-  assert.equal(result.ok, false);
-  assert.ok(result.diagnostics.some(({ code }) => code === "E_STAGE2_UNSUPPORTED"));
+test("every valid example builds a closed solid", async () => {
+  for (const name of ["solid-basic", "asymmetric", "spokes-flanged"]) {
+    const result = generatePulley(await readJson(`../examples/valid/${name}.json`));
+    assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
+    assert.deepEqual(result.verification.errors, [], name);
+    assert.deepEqual(result.diagnostics.map(({ code }) => code), ["W_EXPERIMENTAL_PROFILE"], name);
+  }
 });
 
 function readBinaryStl(data) {
