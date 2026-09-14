@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "kind": "timingPulley",
+  "units": "mm",
+  "rim": {
+    "profile": "gt2-2mm-experimental-v1",
+    "toothCount": 60,
+    "toothedWidth": 9,
+    "radialThickness": 2
+  },
+  "flanges": {
+    "lower": {
+      "axialThickness": 0.8,
+      "radialExtension": 1
+    },
+    "upper": {
+      "axialThickness": 1.2,
+      "radialExtension": 1.5
+    }
+  },
+  "web": {
+    "type": "spokes",
+    "axialThickness": 4,
+    "axialOffset": 0,
+    "count": 6,
+    "width": 3,
+    "filletRadius": 1
+  },
+  "hub": {
+    "boreDiameter": 5.2,
+    "outerDiameter": 12,
+    "lowerExtension": 2,
+    "upperExtension": 3
+  },
+  "generation": {
+    "maxChordError": 0.04
+  }
+}

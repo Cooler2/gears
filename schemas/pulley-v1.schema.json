@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gears.local/schemas/pulley-v1.schema.json",
+  "title": "Gears timing pulley description, version 1",
+  "description": "Static structure and scalar limits for the first GT 2 mm pulley contract. Cross-field geometry rules are defined in docs/contract.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "units",
+    "rim",
+    "flanges",
+    "web",
+    "hub",
+    "generation"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Major version of the persisted input format."
+    },
+    "kind": {
+      "const": "timingPulley",
+      "description": "Part family handled by this contract."
+    },
+    "units": {
+      "const": "mm",
+      "description": "Unit for every dimensional input and output unless explicitly stated otherwise."
+    },
+    "rim": {
+      "$ref": "#/$defs/rim"
+    },
+    "flanges": {
+      "$ref": "#/$defs/flanges"
+    },
+    "web": {
+      "oneOf": [
+        { "$ref": "#/$defs/solidWeb" },
+        { "$ref": "#/$defs/spokeWeb" }
+      ]
+    },
+    "hub": {
+      "$ref": "#/$defs/hub"
+    },
+    "generation": {
+      "$ref": "#/$defs/generation"
+    }
+  },
+  "$defs": {
+    "rim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "toothCount", "toothedWidth", "radialThickness"],
+      "properties": {
+        "profile": {
+          "const": "gt2-2mm-experimental-v1",
+          "description": "Experimental polyline derived from the legacy prototype; pitch and outside diameter are verified, exact groove shape is not."
+        },
+        "toothCount": {
+          "type": "integer",
+          "minimum": 14,
+          "maximum": 120,
+          "default": 40,
+          "description": "Number of equally spaced pulley grooves."
+        },
+        "toothedWidth": {
+          "type": "number",
+          "minimum": 2,
+          "maximum": 50,
+          "default": 6,
+          "description": "Axial width of the toothed rim, centered on z=0 from -toothedWidth/2 to +toothedWidth/2."
+        },
+        "radialThickness": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 25,
+          "default": 2,
+          "description": "Radial material thickness inward from the tooth-root radius to the inner rim radius."
+        }
+      }
+    },
+    "flange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["axialThickness", "radialExtension"],
+      "properties": {
+        "axialThickness": {
+          "type": "number",
+          "minimum": 0.4,
+          "maximum": 5,
+          "default": 1,
+          "description": "Axial flange thickness measured away from the toothed rim."
+        },
+        "radialExtension": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 10,
+          "default": 1,
+          "description": "Radial projection beyond the pulley outside radius."
+        }
+      }
+    },
+    "flanges": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lower", "upper"],
+      "properties": {
+        "lower": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/flange" }
+          ],
+          "default": null,
+          "description": "Flange below z=-toothedWidth/2; null means absent."
+        },
+        "upper": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/flange" }
+          ],
+          "default": null,
+          "description": "Flange above z=+toothedWidth/2; null means absent."
+        }
+      }
+    },
+    "webPlacement": {
+      "properties": {
+        "axialThickness": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 3,
+          "description": "Axial thickness of the web or spokes."
+        },
+        "axialOffset": {
+          "type": "number",
+          "minimum": -24.5,
+          "maximum": 24.5,
+          "default": 0,
+          "description": "Z coordinate of the web mid-plane relative to the toothed-rim mid-plane at z=0; positive is toward the upper side."
+        }
+      }
+    },
+    "solidWeb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "axialThickness", "axialOffset"],
+      "properties": {
+        "type": {
+          "const": "solid",
+          "description": "A continuous annular web between hub and rim."
+        },
+        "axialThickness": { "$ref": "#/$defs/webPlacement/properties/axialThickness" },
+        "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" }
+      }
+    },
+    "spokeWeb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "axialThickness",
+        "axialOffset",
+        "count",
+        "width",
+        "filletRadius"
+      ],
+      "properties": {
+        "type": {
+          "const": "spokes",
+          "description": "Equally spaced straight radial spokes with mandatory in-plane fillets."
+        },
+        "axialThickness": { "$ref": "#/$defs/webPlacement/properties/axialThickness" },
+        "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" },
+        "count": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 12,
+          "default": 6,
+          "description": "Number of equally spaced straight radial spokes."
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 2.5,
+          "description": "Tangential width of each straight spoke before root fillets."
+        },
+        "filletRadius": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 10,
+          "default": 1,
+          "description": "In-plane radius of both hub-to-spoke and spoke-to-rim fillets."
+        }
+      }
+    },
+    "hub": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boreDiameter", "outerDiameter", "lowerExtension", "upperExtension"],
+      "properties": {
+        "boreDiameter": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 50,
+          "default": 5,
+          "description": "Diameter of the centered cylindrical through bore."
+        },
+        "outerDiameter": {
+          "type": "number",
+          "minimum": 2,
+          "maximum": 100,
+          "default": 10,
+          "description": "Outside diameter of the cylindrical hub."
+        },
+        "lowerExtension": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "default": 0,
+          "description": "Hub projection below the lower toothed-rim face at z=-toothedWidth/2."
+        },
+        "upperExtension": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "default": 0,
+          "description": "Hub projection above the upper toothed-rim face at z=+toothedWidth/2."
+        }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxChordError"],
+      "properties": {
+        "maxChordError": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 0.25,
+          "default": 0.05,
+          "description": "Maximum radial sagitta in millimetres for generated circular arcs; it is a meshing setting, not a physical dimension."
+        }
+      }
+    }
+  }
+}
