@@ -29,6 +29,14 @@ export function buildSolidPulleyMesh(description, derived) {
   const rimSegments = Math.ceil(rimMinimum / rimAngularPeriod) * rimAngularPeriod;
   if (rimSegments > 4096) return complexityFailure();
   circleSegments.set(rimInnerRadius, rimSegments);
+  // Flange circles share the half-pitch phase used by the rim.
+  for (const flange of [description.flanges.lower, description.flanges.upper]) {
+    if (!flange) continue;
+    const radius = outsideRadius + flange.radialExtension;
+    const count = Math.ceil(circleSegmentCount(radius, error) / rimAngularPeriod) * rimAngularPeriod;
+    if (count > 4096) return complexityFailure();
+    circleSegments.set(radius, count);
+  }
 
   const profilePoints = buildGt2Contour(description.rim.toothCount, outsideRadius);
   const profileStart = 9;
@@ -59,10 +67,11 @@ export function buildSolidPulleyMesh(description, derived) {
     };
   }
 
-  const boreLower = circle(boreRadius, lowerZ);
-  const boreUpper = circle(boreRadius, upperZ);
-  const hubLower = circle(hubRadius, lowerZ);
-  const hubUpper = circle(hubRadius, upperZ);
+  const { hubLowerZ, hubUpperZ } = derived;
+  const boreLower = circle(boreRadius, hubLowerZ);
+  const boreUpper = circle(boreRadius, hubUpperZ);
+  const hubLower = circle(hubRadius, hubLowerZ);
+  const hubUpper = circle(hubRadius, hubUpperZ);
   const rimLower = circle(rimInnerRadius, lowerZ);
   const rimUpper = circle(rimInnerRadius, upperZ);
   const outerLower = profile(lowerZ);
@@ -72,22 +81,40 @@ export function buildSolidPulleyMesh(description, derived) {
   const rimWebLower = circle(rimInnerRadius, webLowerZ);
   const rimWebUpper = circle(rimInnerRadius, webUpperZ);
 
-  annulus(boreUpper, hubUpper, true);
-  annulus(rimUpper, outerUpper, true);
-  annulus(hubWebUpper, rimWebUpper, true);
-  annulus(boreLower, hubLower, false);
-  annulus(rimLower, outerLower, false);
-  annulus(hubWebLower, rimWebLower, false);
+  // Hub caps follow the extension limits, independently of the rim width.
+  annulus({ inner: boreUpper, outer: hubUpper, normal: "+Z" });
+  annulus({ inner: boreLower, outer: hubLower, normal: "-Z" });
+  wall({ lower: boreLower, upper: boreUpper, normal: "radiallyInward" });
+  wall({ lower: outerLower, upper: outerUpper, normal: "radiallyOutward" });
 
-  wall(outerLower, outerUpper, true);
-  wall(boreLower, boreUpper, false);
-  if (webUpperZ < upperZ) {
-    wall(hubWebUpper, hubUpper, true);
-    wall(rimWebUpper, rimUpper, false);
-  }
-  if (webLowerZ > lowerZ) {
-    wall(hubLower, hubWebLower, true);
-    wall(rimLower, rimWebLower, false);
+  const lowerShellZ = addFlange({ side: "lower", flange: description.flanges.lower, rimZ: lowerZ, rimProfile: outerLower });
+  const upperShellZ = addFlange({ side: "upper", flange: description.flanges.upper, rimZ: upperZ, rimProfile: outerUpper });
+  if (!description.flanges.lower) annulus({ inner: rimLower, outer: outerLower, normal: "-Z" });
+  if (!description.flanges.upper) annulus({ inner: rimUpper, outer: outerUpper, normal: "+Z" });
+
+  annulus({ inner: hubWebUpper, outer: rimWebUpper, normal: "+Z" });
+  annulus({ inner: hubWebLower, outer: rimWebLower, normal: "-Z" });
+  if (hubLowerZ < webLowerZ) wall({ lower: hubLower, upper: hubWebLower, normal: "radiallyOutward" });
+  if (webUpperZ < hubUpperZ) wall({ lower: hubWebUpper, upper: hubUpper, normal: "radiallyOutward" });
+  if (lowerShellZ < webLowerZ) wall({ lower: circle(rimInnerRadius, lowerShellZ), upper: rimWebLower, normal: "radiallyInward" });
+  if (webUpperZ < upperShellZ) wall({ lower: rimWebUpper, upper: circle(rimInnerRadius, upperShellZ), normal: "radiallyInward" });
+
+  /**
+   * Add one axial flange. At the rim interface only the ledge outside the
+   * tooth profile is exposed; the overlapping rim area is internal.
+   */
+  function addFlange({ side, flange, rimZ, rimProfile }) {
+    if (!flange) return rimZ;
+    const upper = side === "upper";
+    const farZ = rimZ + (upper ? flange.axialThickness : -flange.axialThickness);
+    const radius = outsideRadius + flange.radialExtension;
+    const rimOuter = circle(radius, rimZ);
+    const farOuter = circle(radius, farZ);
+    const farInner = circle(rimInnerRadius, farZ);
+    annulus({ inner: rimProfile, outer: rimOuter, normal: upper ? "-Z" : "+Z" });
+    annulus({ inner: farInner, outer: farOuter, normal: upper ? "+Z" : "-Z" });
+    wall({ lower: upper ? rimOuter : farOuter, upper: upper ? farOuter : rimOuter, normal: "radiallyOutward" });
+    return farZ;
   }
 
   function triangle(a, b, c, flip = false) {
@@ -95,12 +122,13 @@ export function buildSolidPulleyMesh(description, derived) {
     else indices.push(a, b, c);
   }
 
-  function wall(lower, upper, outward) {
+  /** Connect matching clockwise contours through Z; normal names the exposed radial side. */
+  function wall({ lower, upper, normal }) {
     const count = lower.ids.length;
     if (upper.ids.length !== count) throw new Error("Wall loops must have equal vertex counts");
     for (let index = 0; index < count; index += 1) {
       const next = (index + 1) % count;
-      if (outward) {
+      if (normal === "radiallyOutward") {
         triangle(lower.ids[index], upper.ids[index], upper.ids[next]);
         triangle(lower.ids[index], upper.ids[next], lower.ids[next]);
       } else {
@@ -110,7 +138,11 @@ export function buildSolidPulleyMesh(description, derived) {
     }
   }
 
-  function annulus(inner, outer, top) {
+  /**
+   * Fill a planar ring between nested clockwise contours. Counts may differ;
+   * normal explicitly selects the exposed side: +Z or -Z.
+   */
+  function annulus({ inner, outer, normal }) {
     const innerCount = inner.ids.length;
     const outerCount = outer.ids.length;
     const columns = outerCount + 1;
@@ -170,7 +202,7 @@ export function buildSolidPulleyMesh(description, derived) {
       }
     }
     selected.reverse();
-    for (const [a, b, c] of selected) triangle(a, b, c, !top);
+    for (const [a, b, c] of selected) triangle(a, b, c, normal === "-Z");
 
     function update(destination, cost, parent) {
       if (cost < costs[destination]) {

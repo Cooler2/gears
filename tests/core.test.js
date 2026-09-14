@@ -169,12 +169,21 @@ test("binary STL has valid size, triangle count, bounds, and optional bed placem
   assert.deepEqual(model.sourceBounds, result.mesh.bounds);
 });
 
-test("stage-2 scope is reported explicitly for later construction variants", async () => {
+test("flanges and independent hub extensions build one closed solid", async () => {
   const input = await readJson("../examples/valid/asymmetric.json");
+  const result = generatePulley(input);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  assert.equal(result.mesh.bounds.min[2], -4);
+  assert.equal(result.mesh.bounds.max[2], 6);
+  assert.equal(result.verification.connectedComponents, 1);
+  assert.deepEqual(result.verification.errors, []);
+});
+
+test("spokes remain unavailable until their shared-boundary implementation is complete", async () => {
+  const input = await readJson("../examples/valid/spokes-flanged.json");
   const result = generatePulley(input);
   assert.equal(result.ok, false);
   assert.ok(result.diagnostics.some(({ code }) => code === "E_STAGE2_UNSUPPORTED"));
-  assert.equal(Object.hasOwn(result, "mesh"), false);
 });
 
 function readBinaryStl(data) {

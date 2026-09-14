@@ -8,10 +8,6 @@ export function generatePulley(input) {
 
   const unsupportedPaths = [];
   if (result.normalized.web.type !== "solid") unsupportedPaths.push("/web/type");
-  if (result.normalized.flanges.lower !== null) unsupportedPaths.push("/flanges/lower");
-  if (result.normalized.flanges.upper !== null) unsupportedPaths.push("/flanges/upper");
-  if (result.normalized.hub.lowerExtension !== 0) unsupportedPaths.push("/hub/lowerExtension");
-  if (result.normalized.hub.upperExtension !== 0) unsupportedPaths.push("/hub/upperExtension");
   if (unsupportedPaths.length) {
     return {
       ...result,
@@ -21,7 +17,7 @@ export function generatePulley(input) {
         "error",
         "build",
         unsupportedPaths,
-        { supportedVariant: "solid web, no flanges, zero hub extensions" }
+        { supportedVariant: "solid web" }
       )]
     };
   }
