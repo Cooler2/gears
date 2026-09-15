@@ -15,11 +15,15 @@ export function exportBinaryStl(mesh, { placement = "model" } = {}) {
   view.setUint32(80, triangleCount, true);
   let offset = 84;
   for (let face = 0; face < triangleCount; face += 1) {
-    const vertices = mesh.indices.slice(face * 3, face * 3 + 3).map((id) => [
-      mesh.vertices[id * 3] + translation[0],
-      mesh.vertices[id * 3 + 1] + translation[1],
-      mesh.vertices[id * 3 + 2] + translation[2]
-    ]);
+    // indexed access rather than slice().map(): a typed index array would map into itself
+    const vertices = [0, 1, 2].map((corner) => {
+      const id = mesh.indices[face * 3 + corner];
+      return [
+        mesh.vertices[id * 3] + translation[0],
+        mesh.vertices[id * 3 + 1] + translation[1],
+        mesh.vertices[id * 3 + 2] + translation[2]
+      ];
+    });
     const normal = unitNormal(vertices[0], vertices[1], vertices[2]);
     for (const value of normal) { view.setFloat32(offset, value, true); offset += 4; }
     for (const vertex of vertices) {

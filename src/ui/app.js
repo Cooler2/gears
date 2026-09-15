@@ -1,43 +1,83 @@
-// Pulley form: groups of fields, live drawings, diagnostics next to the fields.
+// Pulley form: groups of fields, live drawings, diagnostics next to the fields,
+// and the 3D preview of the built part.
 //
-// Flow: every edit produces a new state → validateDescription (core) → drawings
-// and messages are redrawn. The form itself is rebuilt only when its structure
-// changes (group, web type, flange switch, loaded file), so typing keeps the caret.
+// Flow: every edit produces a new state → validateDescription (core, main thread,
+// fractions of a millisecond) → drawings and messages are redrawn. A valid state
+// is also sent to the worker, which builds the mesh; its answer is shown only
+// while it still matches the current parameters, and only then STL is offered.
+// The form itself is rebuilt only when its structure changes (group, web type,
+// flange switch, loaded file), so typing keeps the caret.
 
 import { buildPlanView, validateDescription } from "../core/generate.js";
+import { exportBinaryStl } from "../export/stl.js";
+import { BuildClient } from "../worker/client.js";
 import { chordSummary, renderChord, renderPlan, renderSection } from "./drawings.js";
 import { FIELD_BY_PATH, GROUPS, fieldLabel, fieldSchema, fieldsOf, groupOfPath } from "./fields.js";
-import { escapeHtml, formatNumber, inputText, symbolHtml } from "./format.js";
+import { escapeHtml, formatNumber, inputText, plural, symbolHtml } from "./format.js";
 import { diagnosticKind, diagnosticText } from "./messages.js";
 import { PRESETS } from "./presets.js";
 import { createState, getValue, loadDescription, parseNumber, setFlange, setValue, setWebType } from "./state.js";
+import { MeshViewer } from "./viewer.js";
 
 const STORAGE_KEY = "gears.pulley.form.v1";
 const SECTION_FIRST = new Set(["flanges", "hub"]);
+const MAX_FILE_BYTES = 1 << 20; // a description is well under a kilobyte
+const BUILD_TIMEOUT_MS = 20000;
+const PREVIEW_TAGS = { fresh: "по текущим параметрам", building: "строится…", invalid: "устарела", failed: "не построена", crashed: "сбой" };
 const $ = (selector) => document.querySelector(selector);
 const el = {
   nav: $("#groups"), title: $("#group-title"), form: $("#form"), status: $("#status"),
   plan: $("#plan"), section: $("#section"), sectionTag: $("#section-tag"), planTag: $("#plan-tag"),
   chordFigure: $("#chord-figure"), chord: $("#chord"), planFigure: $("#plan-figure"), sectionFigure: $("#section-figure"),
-  stale: $("#stale"), file: $("#file-input"), notice: $("#notice")
+  stale: $("#stale"), file: $("#file-input"), notice: $("#notice"),
+  viewport: $("#viewport"), canvas: $("#viewer"), previewState: $("#preview-state"), overlay: $("#preview-overlay"),
+  previewInfo: $("#preview-info"), retry: $("#retry"), stl: $("#download-stl")
 };
 
-const schema = await fetchJson("../../schemas/pulley-v1.schema.json");
-const presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(`../../examples/valid/${preset.file}`) })));
+let schema, presets;
+try {
+  schema = await fetchJson("../../schemas/pulley-v1.schema.json");
+  presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(`../../examples/valid/${preset.file}`) })));
+} catch (error) {
+  $("#boot").className = "notice notice-error";
+  $("#boot").textContent = `Не удалось загрузить схему или примеры (${error.message}). Страница должна раздаваться из корня проекта: npm run ui.`;
+  throw error;
+}
+$("#boot").hidden = true;
 
 let state = restoreState() ?? createState(schema);
 const view = { group: "rim", focus: null, ...readHash() };
-let result = null;
+let validation = null; // core answer for the current description
+let result = null; // the same with build failures of the current description added
+let currentKey = null;
 let model = null; // last structurally valid description with its geometry
+let build = { key: null, reply: null }; // worker answer for the parameters that were current when it arrived
+
+const client = new BuildClient({
+  createWorker: () => new Worker(new URL("../worker/pulley-worker.js", import.meta.url), { type: "module" }),
+  onResult: receiveBuild,
+  timeoutMs: BUILD_TIMEOUT_MS
+});
+const viewer = createViewer();
 
 evaluate();
 renderAll();
 if (view.focus) focusField(view.focus);
+scheduleBuild();
+renderPreview();
 
 // ------------------------------------------------------------------ state
 
 function evaluate() {
-  result = validateDescription(state.description);
+  validation = validateDescription(state.description);
+  currentKey = JSON.stringify(state.description);
+  result = validation;
+  const answer = build.key === currentKey ? build.reply : null;
+  if (validation.ok && answer?.type === "built" && !answer.ok) {
+    // mesh-level failures belong to these parameters: shown next to their fields like any other
+    const failures = answer.diagnostics.filter((item) => item.phase === "build");
+    result = { ...validation, ok: false, diagnostics: [...validation.diagnostics, ...failures] };
+  }
   if (result.normalized) {
     model = { normalized: result.normalized, derived: result.derived, anchors: result.anchors, plan: buildPlanView(result.normalized, result.derived) };
   }
@@ -51,6 +91,24 @@ function update(next, { rebuildForm = false } = {}) {
   renderNav();
   renderMessages();
   renderDrawings();
+  scheduleBuild();
+  renderPreview();
+}
+
+/** Ask the worker for the current part unless it is invalid or already answered. */
+function scheduleBuild() {
+  const answered = build.key === currentKey && build.reply !== null;
+  client.request(currentKey, validation.ok && !answered ? state.description : null);
+}
+
+function receiveBuild(answer) {
+  build = answer;
+  if (answer.reply.type === "built" && answer.reply.ok) viewer?.setMesh(answer.reply.mesh);
+  evaluate();
+  renderNav();
+  renderMessages();
+  renderDrawings();
+  renderPreview();
 }
 
 function saveState() {
@@ -277,6 +335,73 @@ function renderDrawings() {
   if (view.group === "generation") el.chord.innerHTML = renderChord(model, ctx);
 }
 
+function createViewer() {
+  try {
+    return new MeshViewer(el.canvas);
+  } catch {
+    el.canvas.hidden = true;
+    return null;
+  }
+}
+
+/**
+ * State of the preview relative to the current parameters:
+ * fresh — built from them; building — asked for; invalid — they cannot be built;
+ * failed — the core refused the mesh; crashed — the worker broke or timed out.
+ */
+function previewState() {
+  const answer = build.key === currentKey ? build.reply : null;
+  if (!validation.ok) return "invalid";
+  if (!answer) return "building";
+  if (answer.type === "crashed") return "crashed";
+  return answer.ok ? "fresh" : "failed";
+}
+
+function renderPreview() {
+  const status = previewState();
+  const shown = Boolean(viewer?.source);
+  const answer = build.reply;
+  const previous = shown ? " Показана модель для прежних параметров." : "";
+  const cause = answer?.message === "timeout" ? `нет ответа за ${BUILD_TIMEOUT_MS / 1000} с` : answer?.message;
+  const overlay = {
+    fresh: "",
+    building: shown ? "Строится модель для новых параметров…" : "Строится модель…",
+    invalid: shown ? "Модель для прежних параметров: в текущих есть ошибки, они показаны у полей." : "Модели нет: исправьте ошибки в размерах.",
+    failed: `Ядро не смогло построить сетку, причина — в сообщениях у полей.${previous}`,
+    crashed: `Сбой фонового вычисления (${cause}).${previous} Если повтор не помогает, сохраните JSON: по нему сбой можно воспроизвести.`
+  }[status];
+  el.viewport.dataset.state = status;
+  el.previewState.textContent = PREVIEW_TAGS[status];
+  el.canvas.setAttribute("aria-label", `3D-модель шкива, ${PREVIEW_TAGS[status]}`);
+  el.overlay.textContent = viewer ? overlay : `3D-просмотр недоступен: браузер не дал WebGL. ${status === "fresh" ? "Модель построена, STL можно скачать." : overlay}`;
+  el.overlay.hidden = viewer ? !overlay : false;
+  el.retry.hidden = status !== "crashed";
+  viewer?.setStale(status !== "fresh" && status !== "building");
+
+  if (status === "fresh") {
+    const { bounds } = answer.mesh;
+    const size = [0, 1, 2].map((axis) => formatNumber(bounds.max[axis] - bounds.min[axis])).join(" × ");
+    const triangles = answer.verification.triangleCount;
+    el.previewInfo.textContent = `${size} мм · ${triangles.toLocaleString("ru-RU")} ${plural(triangles, "треугольник", "треугольника", "треугольников")} · построено за ${Math.round(answer.elapsed)} мс`;
+  } else {
+    el.previewInfo.textContent = "";
+  }
+  const blocker = stlBlocker(status);
+  el.stl.setAttribute("aria-disabled", String(Boolean(blocker)));
+  el.stl.title = blocker || "Сетка по текущим параметрам, деталь стоит на столе нижней гранью";
+}
+
+/** Why STL cannot be downloaded right now; empty when it can. */
+function stlBlocker(status = previewState()) {
+  return {
+    fresh: "",
+    building: "Модель для текущих параметров ещё строится.",
+    invalid: "В размерах есть ошибки. Прежняя модель не скачивается, чтобы не спутать её с текущей.",
+    failed: "Модель по текущим параметрам не построилась, причина — в сообщениях у полей.",
+    crashed: "Фоновое вычисление завершилось сбоем. Нажмите «Повторить построение»."
+  }[status];
+}
+
 // ----------------------------------------------------------------- events
 
 el.nav.addEventListener("click", (event) => {
@@ -395,17 +520,46 @@ $("#save").addEventListener("click", () => {
     return;
   }
   const blob = new Blob([`${JSON.stringify(result.normalized, null, 2)}\n`], { type: "application/json" });
-  const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `pulley-${result.normalized.rim.toothCount}t.json` });
-  link.click();
-  URL.revokeObjectURL(link.href);
+  download(blob, `pulley-${result.normalized.rim.toothCount}t.json`);
   showNotice(result.ok ? "Описание сохранено." : "Описание сохранено, но в нём есть ошибки размеров.");
 });
+
+// only the mesh built from exactly the current parameters is exported
+el.stl.addEventListener("click", () => {
+  const blocker = stlBlocker();
+  if (blocker) {
+    showNotice(`STL не скачан. ${blocker}`, "error");
+    return;
+  }
+  const exported = exportBinaryStl(build.reply.mesh, { placement: "onBed" });
+  download(new Blob([exported.data], { type: "model/stl" }), `pulley-${validation.normalized.rim.toothCount}t.stl`);
+  showNotice("STL скачан. Деталь стоит на столе нижней гранью, координаты в миллиметрах.");
+});
+
+$("#view-reset").addEventListener("click", () => viewer?.resetView());
+
+el.retry.addEventListener("click", () => {
+  build = { key: null, reply: null };
+  scheduleBuild();
+  renderPreview();
+});
+
+function download(blob, name) {
+  const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+  link.click();
+  // revoke later: some browsers read the blob after click() returns
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
 
 $("#open").addEventListener("click", () => el.file.click());
 el.file.addEventListener("change", async () => {
   const file = el.file.files[0];
   el.file.value = "";
   if (!file) return;
+  if (file.size > MAX_FILE_BYTES) {
+    showNotice(`«${file.name}» слишком большой для описания шкива (${Math.round(file.size / 1024)} КБ).`, "error");
+    return;
+  }
   let parsed;
   try {
     parsed = JSON.parse(await file.text());

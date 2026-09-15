@@ -20,6 +20,9 @@
   --ink: #2d3138;
   --hatch: rgba(45, 49, 56, 0.35);
   --paper: #fbfaf7;
+  --model: #e39b4f;
+  --model-back: #d42a2a;
+  --grid: #cfccc3;
   color-scheme: light;
 }
 
@@ -46,6 +49,9 @@
     --ink: #d7dadf;
     --hatch: rgba(230, 232, 235, 0.3);
     --paper: #1a1c20;
+    --model: #d08c45;
+    --model-back: #e04848;
+    --grid: #373b43;
     color-scheme: dark;
   }
 }
@@ -119,6 +125,22 @@ button {
 .actions button:hover { border-color: var(--accent); }
 .actions .quiet { color: var(--muted); }
 
+.actions .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/* aria-disabled rather than disabled: the button stays focusable and explains itself on click */
+.actions [aria-disabled="true"] {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 400;
+  cursor: not-allowed;
+}
+
 .notice {
   margin: 0;
   padding: 8px 24px;
@@ -175,20 +197,36 @@ button {
 
 /* layout */
 
+/* the preview sits under the form, beside the drawings, and a third column on wide screens */
 .layout {
   display: grid;
   grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "form drawings" "preview drawings";
   gap: 20px;
   padding: 20px 24px 32px;
   align-items: start;
 }
 
+.form-panel { grid-area: form; }
+.drawings { grid-area: drawings; }
+.preview { grid-area: preview; position: sticky; top: 12px; }
+
+@media (min-width: 1500px) {
+  .layout {
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) minmax(360px, 0.8fr);
+    grid-template-rows: auto;
+    grid-template-areas: "form drawings preview";
+  }
+}
+
 @media (max-width: 860px) {
-  .layout { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "form" "drawings" "preview"; padding: 16px; }
+  .preview { position: static; }
   .top, .groups { padding-left: 16px; padding-right: 16px; }
 }
 
-.form-panel, .drawings {
+.form-panel, .drawings, .preview {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -452,6 +490,92 @@ figcaption {
   font-size: 13px;
   color: var(--muted);
 }
+
+/* 3D preview */
+
+.preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.preview-head h2 { margin: 0; font-size: 18px; }
+
+.viewport {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.viewport canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 70vh;
+  touch-action: none; /* the canvas handles drag and pinch itself */
+  cursor: grab;
+}
+
+.viewport canvas:active { cursor: grabbing; }
+.viewport canvas:focus-visible { outline-offset: -3px; }
+
+.viewport[data-state="fresh"] { border-color: var(--line); }
+.viewport:is([data-state="invalid"], [data-state="failed"], [data-state="crashed"]) { border-style: dashed; border-color: var(--advice); }
+
+.preview-overlay {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--advice-soft);
+  color: var(--advice);
+  font-size: 13.5px;
+  pointer-events: none;
+}
+
+.viewport[data-state="crashed"] .preview-overlay { background: var(--error-soft); color: var(--error); }
+
+/* a normal build takes a tenth of a second: announce it only if it lingers */
+.viewport[data-state="building"] .preview-overlay {
+  background: var(--accent-soft);
+  color: var(--text);
+  animation: appear 0s linear 0.3s both;
+}
+
+@keyframes appear {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
+
+.preview-info {
+  min-height: 1.45em;
+  margin: 8px 0 6px;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.preview-actions button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.preview-actions button:hover { border-color: var(--accent); }
 
 /* svg content: model units scale, strokes stay in screen pixels */
 

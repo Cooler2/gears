@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Шкив GT2 — параметры</title>
+  <title>Шкив GT2 — генератор</title>
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="app.js"></script>
 </head>
@@ -16,16 +16,34 @@
     <div class="actions">
       <button type="button" id="open">Открыть JSON</button>
       <button type="button" id="save">Сохранить JSON</button>
+      <button type="button" id="download-stl" class="primary" aria-disabled="true" aria-describedby="preview-state">Скачать STL</button>
       <button type="button" id="reset" class="quiet">Сбросить</button>
       <input type="file" id="file-input" accept=".json,application/json" hidden>
     </div>
   </header>
+  <p id="boot" class="notice">Загрузка… Если страница так и не заработала, её открыли без локального сервера: браузеры не загружают модули с file://. Запустите <code>npm run ui</code> и откройте http://localhost:8080/.</p>
   <p id="notice" class="notice" role="status" hidden></p>
   <nav id="groups" class="groups" aria-label="Разделы параметров"></nav>
   <main class="layout">
     <section class="form-panel" aria-labelledby="group-title">
       <h2 id="group-title"></h2>
       <div id="form"></div>
+    </section>
+    <section class="preview" aria-labelledby="preview-title">
+      <div class="preview-head">
+        <h2 id="preview-title">3D-модель</h2>
+        <span class="tag" id="preview-state">строится…</span>
+      </div>
+      <div class="viewport" id="viewport" data-state="building">
+        <canvas id="viewer" tabindex="0" aria-label="3D-модель шкива" aria-describedby="viewer-help"></canvas>
+        <p id="preview-overlay" class="preview-overlay" aria-live="polite" hidden></p>
+      </div>
+      <p id="preview-info" class="preview-info"></p>
+      <div class="preview-actions">
+        <button type="button" id="view-reset">Исходный вид</button>
+        <button type="button" id="retry" hidden>Повторить построение</button>
+      </div>
+      <p id="viewer-help" class="drawing-help">Перетаскивание — поворот, с Shift или правой кнопкой — сдвиг, колесо — масштаб, двойной щелчок — исходный вид. С клавиатуры: стрелки, Shift+стрелки, + и −, 0. Грани, видимые с изнанки, окрашены красным — на исправной сетке их не видно.</p>
     </section>
     <section class="drawings" aria-label="Чертежи">
       <div id="status" class="status" aria-live="polite"></div>

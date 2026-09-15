@@ -6,6 +6,15 @@ export function formatNumber(value, digits = 2) {
   return String(Object.is(rounded, -0) ? 0 : rounded).replace(".", ",").replace("-", "−");
 }
 
+/** Russian noun form for a count: plural(3, "треугольник", "треугольника", "треугольников"). */
+export function plural(count, one, few, many) {
+  const tens = Math.abs(count) % 100;
+  const units = tens % 10;
+  if (tens >= 11 && tens <= 14) return many;
+  if (units === 1) return one;
+  return units >= 2 && units <= 4 ? few : many;
+}
+
 /** Text for an input box: numbers with a decimal comma, anything else as typed. */
 export function inputText(value) {
   return typeof value === "number" ? String(value).replace(".", ",") : String(value ?? "");

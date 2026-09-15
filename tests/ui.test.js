@@ -4,7 +4,7 @@ import test from "node:test";
 import { buildPlanView, validateDescription } from "../src/core/generate.js";
 import { chordSummary, renderChord, renderPlan, renderSection } from "../src/ui/drawings.js";
 import { FIELDS, GROUPS, fieldSchema, fieldsOf, groupOfPath } from "../src/ui/fields.js";
-import { formatNumber, inputText, splitSymbol } from "../src/ui/format.js";
+import { formatNumber, inputText, plural, splitSymbol } from "../src/ui/format.js";
 import { diagnosticKind, diagnosticText } from "../src/ui/messages.js";
 import { PRESETS } from "../src/ui/presets.js";
 import { createState, getValue, loadDescription, parseNumber, setFlange, setValue, setWebType } from "../src/ui/state.js";
@@ -169,6 +169,9 @@ test("numbers read and written the Russian way", () => {
   assert.equal(inputText("6x"), "6x");
   assert.deepEqual(splitSymbol("T_f−"), { base: "T", sub: "f−" });
   assert.deepEqual(splitSymbol("ε"), { base: "ε", sub: "" });
+  const forms = (count) => plural(count, "треугольник", "треугольника", "треугольников");
+  assert.deepEqual([1, 2, 5, 11, 12, 21, 9324, 7596, 111, 1001].map(forms),
+    ["треугольник", "треугольника", "треугольников", "треугольников", "треугольников", "треугольник", "треугольника", "треугольников", "треугольников", "треугольник"]);
 });
 
 test("diagnostic paths map to groups", () => {
