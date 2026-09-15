@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
-import { generatePulley, validateDescription, verifyMesh } from "../src/core/generate.js";
+import { buildPlanView, generatePulley, validateDescription, verifyMesh } from "../src/core/generate.js";
 import { buildCircleContour, buildGt2Contour, circleSegmentCount } from "../src/core/contours.js";
 import { exportBinaryStl } from "../src/export/stl.js";
 
@@ -136,9 +136,24 @@ test("cross-field invalid examples return their documented diagnostics", async (
   for (const [name, expected] of Object.entries(cases)) {
     const result = validateDescription(await readJson(`../examples/invalid/${name}`));
     assert.equal(result.ok, false, name);
-    assert.equal(result.anchors, null, name);
-    assert.ok(result.diagnostics.some(({ code }) => code === expected), `${name}: ${JSON.stringify(result.diagnostics)}`);
+    // relation conflicts keep the normalized description for drawing, schema errors do not
+    assert.equal(result.anchors === null, expected === "E_SCHEMA_VALUE", name);
+    assert.equal(generatePulley(await readJson(`../examples/invalid/${name}`)).mesh, undefined, name);
+    const found = result.diagnostics.find(({ code }) => code === expected);
+    assert.ok(found, `${name}: ${JSON.stringify(result.diagnostics)}`);
+    if (expected !== "E_SCHEMA_VALUE") assert.ok(Object.values(found.details).every(Number.isFinite), `${name}: details`);
   }
+});
+
+test("relation diagnostics report the compared quantities", async () => {
+  const input = await readJson("../examples/invalid/radial-order.json");
+  const radialOrder = validateDescription(input).diagnostics.find(({ code }) => code === "E_RADIAL_ORDER");
+  const rimInner = 24 / Math.PI - 0.254 - 0.75 - 2;
+  assert.ok(Math.abs(radialOrder.details.span - (rimInner - 4.4)) < 1e-12);
+  assert.equal(radialOrder.details.minimum, 0.5);
+  assert.ok(Math.abs(radialOrder.details.maxHubDiameter - 2 * (rimInner - 0.5)) < 1e-12);
+  const overlap = validateDescription(await readJson("../examples/invalid/spoke-overlap.json")).diagnostics.find(({ code }) => code === "E_SPOKE_OVERLAP");
+  assert.ok(overlap.details.required >= overlap.details.available);
 });
 
 test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
@@ -184,6 +199,30 @@ test("anchors come with the normalized description, without building a mesh", as
   assert.equal(anchors.radii.bore, 2.6);
   assert.equal(anchors.radii.pitch, derived.pitchRadius);
   assert.deepEqual(generatePulley(input).anchors, anchors);
+});
+
+test("plan view gives exact spoke outlines and falls back to strips on conflicts", async () => {
+  const input = await readJson("../examples/valid/trial-60t.json");
+  const { normalized, derived } = validateDescription(input);
+  const plan = buildPlanView(normalized, derived);
+  assert.equal(plan.profile.length, 19 * 60);
+  assert.equal(plan.spokes.schematic, false);
+  assert.equal(plan.spokes.outlines.length, 6);
+  for (const outline of plan.spokes.outlines) {
+    const radii = outline.map((point) => Math.hypot(...point));
+    assert.ok(Math.abs(radii[0] - derived.hubRadius) < 1e-12 && Math.abs(radii.at(-1) - derived.hubRadius) < 1e-12);
+    assert.ok(radii.every((r) => r > derived.hubRadius - 1e-9 && r < derived.rimInnerRadius + 1e-9));
+  }
+
+  input.web.filletRadius = 2; // wider than half the spoke: E_SPOKE_FILLET
+  const conflict = validateDescription(input);
+  assert.equal(conflict.ok, false);
+  const strips = buildPlanView(conflict.normalized, conflict.derived).spokes;
+  assert.equal(strips.schematic, true);
+  assert.equal(strips.outlines.length, 6);
+
+  const solid = validateDescription(await readJson("../examples/valid/trial-20t.json"));
+  assert.equal(buildPlanView(solid.normalized, solid.derived).spokes, null);
 });
 
 test("a pinched vertex is reported even when every edge is paired", () => {

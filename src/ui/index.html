@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Шкив GT2 — параметры</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>Шкив GT2</h1>
+      <span class="badge-exp" title="Шаг и наружный диаметр сверены с каталогом, форма канавки подтверждается только пробной печатью">экспериментальный профиль зубьев</span>
+    </div>
+    <div class="actions">
+      <button type="button" id="open">Открыть JSON</button>
+      <button type="button" id="save">Сохранить JSON</button>
+      <button type="button" id="reset" class="quiet">Сбросить</button>
+      <input type="file" id="file-input" accept=".json,application/json" hidden>
+    </div>
+  </header>
+  <p id="notice" class="notice" role="status" hidden></p>
+  <nav id="groups" class="groups" aria-label="Разделы параметров"></nav>
+  <main class="layout">
+    <section class="form-panel" aria-labelledby="group-title">
+      <h2 id="group-title"></h2>
+      <div id="form"></div>
+    </section>
+    <section class="drawings" aria-label="Чертежи">
+      <div id="status" class="status" aria-live="polite"></div>
+      <p id="stale" class="stale" hidden>Чертёж по последним допустимым значениям: в одном из полей не число или число вне допустимого диапазона.</p>
+      <figure id="chord-figure" hidden>
+        <figcaption>Допуск хорды <span class="tag">схема, прогиб увеличен</span></figcaption>
+        <div id="chord" class="drawing drawing-chord"></div>
+      </figure>
+      <figure id="plan-figure">
+        <figcaption>Поперечный разрез по полотну <span class="tag" id="plan-tag">в масштабе</span></figcaption>
+        <div id="plan" class="drawing"></div>
+      </figure>
+      <figure id="section-figure">
+        <figcaption>Осевой разрез <span class="tag" id="section-tag">в масштабе</span></figcaption>
+        <div id="section" class="drawing"></div>
+      </figure>
+      <p class="drawing-help">Щёлкните по размеру, чтобы перейти к его полю, или по части детали, чтобы открыть её раздел.</p>
+    </section>
+  </main>
+</body>
+</html>

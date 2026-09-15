@@ -34,4 +34,5 @@ function failed(result, ...diagnostics) {
 }
 
 export { validateDescription } from "./parameters.js";
+export { buildPlanView } from "./drawing.js";
 export { verifyMesh } from "./verify-mesh.js";

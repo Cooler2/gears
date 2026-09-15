@@ -8,6 +8,7 @@ const SOLID_WEB_FIELDS = ["type", "axialThickness", "axialOffset"];
 const SPOKE_WEB_FIELDS = [...SOLID_WEB_FIELDS, "count", "width", "filletRadius"];
 const HUB_FIELDS = ["boreDiameter", "outerDiameter", "lowerExtension", "upperExtension"];
 const GENERATION_FIELDS = ["maxChordError"];
+const THIN_FEATURE = 1.2; // print recommendation, mm
 
 export function validateDescription(input) {
   const diagnostics = [];
@@ -23,17 +24,18 @@ export function validateDescription(input) {
     return { ok: false, schemaVersion: 1, normalized: null, derived: null, anchors: null, diagnostics };
   }
 
+  // A structurally valid description is normalized even when relation rules fail:
+  // ok stays false and no mesh is built, but a form can still draw the conflict.
   const normalized = normalize(input);
   const derived = derive(normalized);
   validateRelations(normalized, derived, diagnostics);
   addWarnings(normalized, derived, diagnostics);
-  const ok = !diagnostics.some((item) => item.severity === "error");
   return {
-    ok,
+    ok: !diagnostics.some((item) => item.severity === "error"),
     schemaVersion: 1,
-    normalized: ok ? normalized : null,
-    derived: ok ? derived : null,
-    anchors: ok ? buildAnchors(normalized, derived) : null,
+    normalized,
+    derived,
+    anchors: buildAnchors(normalized, derived),
     diagnostics
   };
 }
@@ -111,25 +113,39 @@ function validateFlange(value, path, diagnostics) {
   numberRange(value.radialExtension, 0.5, 10, `${path}/radialExtension`, diagnostics);
 }
 
+// details carry the compared quantities in mm so a form can explain the conflict
 function validateRelations(input, derived, diagnostics) {
+  const span = derived.rimInnerRadius - derived.hubRadius;
   if (derived.rimInnerRadius <= 0) {
-    diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", ["/rim/toothCount", "/rim/radialThickness"]));
+    diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", ["/rim/toothCount", "/rim/radialThickness"],
+      { rimInnerRadius: derived.rimInnerRadius }));
   }
   if (derived.hubRadius - derived.boreRadius < 1) {
-    diagnostics.push(diagnostic("E_HUB_WALL", "error", "description", ["/hub/boreDiameter", "/hub/outerDiameter"]));
+    diagnostics.push(diagnostic("E_HUB_WALL", "error", "description", ["/hub/boreDiameter", "/hub/outerDiameter"],
+      { wall: derived.hubRadius - derived.boreRadius, minimum: 1 }));
   }
-  if (derived.rimInnerRadius - derived.hubRadius < minimumWebSpan(input.web.type)) {
-    diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", "/rim/toothCount"]));
+  if (span < minimumWebSpan(input.web.type)) {
+    diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", "/rim/toothCount"],
+      { span, minimum: minimumWebSpan(input.web.type), maxHubDiameter: 2 * (derived.rimInnerRadius - minimumWebSpan(input.web.type)) }));
   }
-  if (derived.webLowerZ < -input.rim.toothedWidth / 2 || derived.webUpperZ > input.rim.toothedWidth / 2) {
-    diagnostics.push(diagnostic("E_WEB_AXIAL_RANGE", "error", "description", ["/web/axialThickness", "/web/axialOffset", "/rim/toothedWidth"]));
+  const rimUpperZ = input.rim.toothedWidth / 2;
+  if (derived.webLowerZ < -rimUpperZ || derived.webUpperZ > rimUpperZ) {
+    diagnostics.push(diagnostic("E_WEB_AXIAL_RANGE", "error", "description", ["/web/axialThickness", "/web/axialOffset", "/rim/toothedWidth"],
+      { webLowerZ: derived.webLowerZ, webUpperZ: derived.webUpperZ, rimLowerZ: -rimUpperZ, rimUpperZ }));
   }
   if (input.web.type === "spokes") {
-    if (input.web.filletRadius > input.web.width / 2 || 2 * input.web.filletRadius > derived.rimInnerRadius - derived.hubRadius) {
-      diagnostics.push(diagnostic("E_SPOKE_FILLET", "error", "description", ["/web/width", "/web/filletRadius"]));
+    const { count, width, filletRadius } = input.web;
+    // with no room between hub and rim E_RADIAL_ORDER already speaks for the span;
+    // the fillets are then limited by the spoke width alone
+    const spanKnown = span >= minimumWebSpan("spokes");
+    if (filletRadius > width / 2 || (spanKnown && 2 * filletRadius > span)) {
+      diagnostics.push(diagnostic("E_SPOKE_FILLET", "error", "description", ["/web/width", "/web/filletRadius"],
+        spanKnown ? { maxByWidth: width / 2, maxBySpan: span / 2 } : { maxByWidth: width / 2 }));
     }
-    if (input.web.width + 2 * input.web.filletRadius >= 2 * derived.hubRadius * Math.sin(Math.PI / input.web.count)) {
-      diagnostics.push(diagnostic("E_SPOKE_OVERLAP", "error", "description", ["/web/count", "/web/width", "/web/filletRadius", "/hub/outerDiameter"]));
+    const available = 2 * derived.hubRadius * Math.sin(Math.PI / count);
+    if (width + 2 * filletRadius >= available) {
+      diagnostics.push(diagnostic("E_SPOKE_OVERLAP", "error", "description", ["/web/count", "/web/width", "/web/filletRadius", "/hub/outerDiameter"],
+        { required: width + 2 * filletRadius, available }));
     }
   }
 }
@@ -141,10 +157,11 @@ function minimumWebSpan(webType) {
 }
 
 function addWarnings(input, derived, diagnostics) {
-  if (input.rim.radialThickness < 1.2) diagnostics.push(thin("/rim/radialThickness"));
-  if (input.web.axialThickness < 1.2) diagnostics.push(thin("/web/axialThickness"));
-  if (input.web.type === "spokes" && input.web.width < 1.2) diagnostics.push(thin("/web/width"));
-  if (derived.hubRadius - derived.boreRadius < 1.2) diagnostics.push(thin("/hub/outerDiameter"));
+  const hubWall = derived.hubRadius - derived.boreRadius;
+  if (input.rim.radialThickness < THIN_FEATURE) diagnostics.push(thin("/rim/radialThickness", input.rim.radialThickness));
+  if (input.web.axialThickness < THIN_FEATURE) diagnostics.push(thin("/web/axialThickness", input.web.axialThickness));
+  if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
+  if (hubWall < THIN_FEATURE) diagnostics.push(thin("/hub/outerDiameter", hubWall));
   diagnostics.push(diagnostic("W_EXPERIMENTAL_PROFILE", "warning", "build", ["/rim/profile"]));
 }
 
@@ -267,8 +284,8 @@ function failedSchema(diagnostics, path, rule) {
   return { ok: false, schemaVersion: 1, normalized: null, derived: null, anchors: null, diagnostics };
 }
 
-function thin(path) {
-  return diagnostic("W_THIN_FEATURE", "warning", "print", [path]);
+function thin(path, value) {
+  return diagnostic("W_THIN_FEATURE", "warning", "print", [path], { value, recommended: THIN_FEATURE });
 }
 
 export function diagnostic(code, severity, phase, paths, details) {

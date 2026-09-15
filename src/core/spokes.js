@@ -54,7 +54,9 @@ export function layoutSpokes({ count, width, filletRadius, hubRadius, rimRadius,
       trailing: localChain.map(([u, v]) => toGlobal(axisAngle, u, -v))
     };
   });
-  return { hubTangentAngle, rimTangentAngle, rimGuardAngle, spokes };
+  // fillet centres in the local frame of every spoke, leading side (mirror v for trailing)
+  const fillets = { hubCenter: [hubCenterU, centerV], rimCenter: [rimCenterU, centerV] };
+  return { hubTangentAngle, rimTangentAngle, rimGuardAngle, fillets, spokes };
 }
 
 /** Points of a circular arc from direction `from` to `to` (radians), both ends included. */

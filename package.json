@@ -7,6 +7,7 @@
     "test": "node --test",
     "check": "node --test",
     "generate": "node src/cli/generate.js",
-    "catalog": "node tools/build-catalog.js"
+    "catalog": "node tools/build-catalog.js",
+    "ui": "node tools/serve.js"
   }
 }
