@@ -12,7 +12,7 @@
   "web": { "type": "solid", "axialThickness": 3, "axialOffset": 0 },
   "hub": {
     "boreDiameter": 3,
-    "outerDiameter": 8,
+    "outerDiameter": 8.8,
     "lowerExtension": 0,
     "upperExtension": 0
   },

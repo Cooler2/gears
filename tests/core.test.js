@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { generatePulley, validateDescription, verifyMesh } from "../src/core/generate.js";
 import { buildCircleContour, buildGt2Contour, circleSegmentCount } from "../src/core/contours.js";
@@ -113,7 +113,7 @@ test("rim support vertices keep their tooth-tip phase", async () => {
   }
 });
 
-test("12 and 13 grooves are statically rejected because no v1 hub can fit", async () => {
+test("12 and 13 grooves stay below the supported tooth-count range", async () => {
   const input = await readJson("../examples/valid/solid-basic.json");
   for (const toothCount of [12, 13]) {
     input.rim.toothCount = toothCount;
@@ -124,32 +124,77 @@ test("12 and 13 grooves are statically rejected because no v1 hub can fit", asyn
 });
 
 test("cross-field invalid examples return their documented diagnostics", async () => {
-  const cases = [
-    ["hub-wall.json", "E_HUB_WALL"],
-    ["radial-order.json", "E_RADIAL_ORDER"],
-    ["web-outside-rim.json", "E_WEB_AXIAL_RANGE"],
-    ["spoke-overlap.json", "E_SPOKE_OVERLAP"],
-    ["schema-extra-field.json", "E_SCHEMA_VALUE"]
-  ];
-  for (const [name, expected] of cases) {
+  const cases = {
+    "hub-wall.json": "E_HUB_WALL",
+    "radial-order.json": "E_RADIAL_ORDER",
+    "web-outside-rim.json": "E_WEB_AXIAL_RANGE",
+    "spoke-overlap.json": "E_SPOKE_OVERLAP",
+    "spoke-fillet.json": "E_SPOKE_FILLET",
+    "schema-extra-field.json": "E_SCHEMA_VALUE"
+  };
+  assert.deepEqual(await exampleNames("invalid"), Object.keys(cases).sort(), "every invalid example needs an expected code");
+  for (const [name, expected] of Object.entries(cases)) {
     const result = validateDescription(await readJson(`../examples/invalid/${name}`));
     assert.equal(result.ok, false, name);
+    assert.equal(result.anchors, null, name);
     assert.ok(result.diagnostics.some(({ code }) => code === expected), `${name}: ${JSON.stringify(result.diagnostics)}`);
   }
+});
+
+test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
+  const solid = await readJson("../examples/valid/trial-20t.json");
+  const rimInnerRadius = 20 / Math.PI - 0.254 - 0.75 - solid.rim.radialThickness;
+  const codes = (input) => validateDescription(input).diagnostics.map(({ code }) => code);
+  solid.hub.outerDiameter = 2 * (rimInnerRadius - 0.5);
+  assert.ok(!codes(solid).includes("E_RADIAL_ORDER"));
+  solid.hub.outerDiameter = 2 * (rimInnerRadius - 0.45);
+  assert.ok(codes(solid).includes("E_RADIAL_ORDER"));
+
+  const spokes = await readJson("../examples/valid/trial-60t.json");
+  const spokeRimInner = 60 / Math.PI - 0.254 - 0.75 - spokes.rim.radialThickness;
+  spokes.web.filletRadius = 0.5;
+  spokes.hub.outerDiameter = 2 * (spokeRimInner - 0.9);
+  assert.ok(codes(spokes).includes("E_RADIAL_ORDER"));
 });
 
 test("validation is finite, strict, and does not mutate its input", async () => {
   const input = await readJson("../examples/valid/solid-basic.json");
   const snapshot = structuredClone(input);
   input.hub.boreDiameter = NaN;
+  input.web.axialThickness = Infinity;
   input.rim.extra = 1;
   const result = validateDescription(input);
   assert.equal(result.ok, false);
-  assert.ok(result.diagnostics.some(({ code, paths }) => code === "E_SCHEMA_VALUE" && paths.includes("/hub/boreDiameter")));
-  assert.ok(result.diagnostics.some(({ code, paths }) => code === "E_SCHEMA_VALUE" && paths.includes("/rim/extra")));
+  for (const path of ["/hub/boreDiameter", "/web/axialThickness", "/rim/extra"]) {
+    assert.ok(result.diagnostics.some(({ code, paths }) => code === "E_SCHEMA_VALUE" && paths.includes(path)), path);
+  }
   delete input.rim.extra;
   input.hub.boreDiameter = snapshot.hub.boreDiameter;
+  input.web.axialThickness = snapshot.web.axialThickness;
   assert.deepEqual(input, snapshot);
+});
+
+test("anchors come with the normalized description, without building a mesh", async () => {
+  const input = await readJson("../examples/valid/spokes-flanged.json");
+  const { anchors, derived } = validateDescription(input);
+  assert.deepEqual(anchors.zLevels, {
+    lowerHub: -6.5, lowerFlange: -5.3, rimLower: -4.5, webLower: -2,
+    webUpper: 2, rimUpper: 4.5, upperFlange: 5.7, upperHub: 7.5
+  });
+  assert.equal(anchors.radii.bore, 2.6);
+  assert.equal(anchors.radii.pitch, derived.pitchRadius);
+  assert.deepEqual(generatePulley(input).anchors, anchors);
+});
+
+test("a pinched vertex is reported even when every edge is paired", () => {
+  // two tetrahedra touching only at the origin
+  const vertices = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 0, 0, 0, -1, 0, 0, 0, -1];
+  const faces = (a, b, c, d) => [a, c, b, a, b, d, b, c, d, a, d, c]; // outward for right-handed (a, b, c, d)
+  const indices = [...faces(0, 1, 2, 3), ...faces(0, 5, 4, 6)];
+  const mesh = { vertices, indices, bounds: { min: [-1, -1, -1], max: [1, 1, 1] } };
+  const report = verifyMesh(mesh);
+  assert.ok(report.errors.some(({ details }) => details?.rule === "vertexFan"), JSON.stringify(report.errors));
+  assert.ok(!report.errors.some(({ details }) => details?.edge), "edges themselves are paired");
 });
 
 test("binary STL has valid size, triangle count, bounds, and optional bed placement", async () => {
@@ -179,14 +224,31 @@ test("flanges and independent hub extensions build one closed solid", async () =
   assert.deepEqual(result.verification.errors, []);
 });
 
-test("every valid example builds a closed solid", async () => {
-  for (const name of ["solid-basic", "asymmetric", "spokes-flanged"]) {
-    const result = generatePulley(await readJson(`../examples/valid/${name}.json`));
+test("every valid example builds a closed solid of the expected size", async () => {
+  const extraWarnings = { "trial-20t.json": ["W_THIN_FEATURE"] };
+  for (const name of await exampleNames("valid")) {
+    const input = await readJson(`../examples/valid/${name}`);
+    const result = generatePulley(input);
     assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
     assert.deepEqual(result.verification.errors, [], name);
-    assert.deepEqual(result.diagnostics.map(({ code }) => code), ["W_EXPERIMENTAL_PROFILE"], name);
+    assert.deepEqual(result.diagnostics.map(({ code }) => code), [...(extraWarnings[name] ?? []), "W_EXPERIMENTAL_PROFILE"], name);
+
+    // sizes straight from the contract formulas, not from derive()
+    const { rim, flanges, hub } = input;
+    const outsideRadius = rim.toothCount / Math.PI - 0.254;
+    const flangeRadii = [flanges.lower, flanges.upper].filter(Boolean).map((flange) => outsideRadius + flange.radialExtension);
+    const radius = Math.max(outsideRadius, ...flangeRadii);
+    const bottom = -rim.toothedWidth / 2 - Math.max(hub.lowerExtension, flanges.lower?.axialThickness ?? 0);
+    const top = rim.toothedWidth / 2 + Math.max(hub.upperExtension, flanges.upper?.axialThickness ?? 0);
+    const { min, max } = result.mesh.bounds;
+    assert.ok(Math.abs(max[0] - radius) < 1e-9 && Math.abs(min[0] + radius) < 1e-9, `${name}: radius ${max[0]} vs ${radius}`);
+    assert.ok(Math.abs(min[2] - bottom) < 1e-12 && Math.abs(max[2] - top) < 1e-12, `${name}: height`);
   }
 });
+
+async function exampleNames(group) {
+  return (await readdir(new URL(`../examples/${group}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();
+}
 
 function readBinaryStl(data) {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);

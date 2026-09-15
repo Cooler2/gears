@@ -26,35 +26,7 @@ export function generatePulley(input) {
     return failed(result, ...[...unique.values()].map((error) => diagnostic(error.code, "error", "build", [], error.details)));
   }
 
-  const { normalized, derived } = result;
-  return {
-    ...result,
-    mesh: built.mesh,
-    contours: built.contours,
-    verification,
-    anchors: {
-      axis: { origin: [0, 0, 0], direction: [0, 0, 1] },
-      radii: {
-        bore: derived.boreRadius,
-        hub: derived.hubRadius,
-        rimInner: derived.rimInnerRadius,
-        grooveRoot: derived.grooveRootRadius,
-        outside: derived.outsideRadius,
-        pitch: derived.pitchRadius
-      },
-      zLevels: {
-        lowerHub: derived.hubLowerZ,
-        // far face of the flange, null without it
-        lowerFlange: normalized.flanges.lower ? -normalized.rim.toothedWidth / 2 - normalized.flanges.lower.axialThickness : null,
-        rimLower: -normalized.rim.toothedWidth / 2,
-        webLower: derived.webLowerZ,
-        webUpper: derived.webUpperZ,
-        rimUpper: normalized.rim.toothedWidth / 2,
-        upperFlange: normalized.flanges.upper ? normalized.rim.toothedWidth / 2 + normalized.flanges.upper.axialThickness : null,
-        upperHub: derived.hubUpperZ
-      }
-    }
-  };
+  return { ...result, mesh: built.mesh, contours: built.contours, verification };
 }
 
 function failed(result, ...diagnostics) {

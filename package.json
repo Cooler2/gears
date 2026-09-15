@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node --test",
     "check": "node --test",
-    "generate": "node src/cli/generate.js"
+    "generate": "node src/cli/generate.js",
+    "catalog": "node tools/build-catalog.js"
   }
 }

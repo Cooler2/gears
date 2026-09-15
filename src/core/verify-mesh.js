@@ -30,6 +30,9 @@ export function verifyMesh(mesh) {
     }
   }
 
+  const pinchedVertex = findPinchedVertex(mesh.indices, vertexCount);
+  if (pinchedVertex !== null) errors.push({ code: "E_NON_MANIFOLD", details: { rule: "vertexFan", vertex: pinchedVertex } });
+
   const connectedComponents = faceComponents(triangleCount, edgeMap);
   if (connectedComponents !== 1) errors.push({ code: "E_NON_MANIFOLD", details: { rule: "connectedComponents", connectedComponents } });
   if (!(signedVolume > 0)) errors.push({ code: "E_NON_MANIFOLD", details: { rule: "positiveVolume", signedVolume } });
@@ -50,6 +53,33 @@ export function verifyMesh(mesh) {
     records.push({ from, to, face });
     edgeMap.set(key, records);
   }
+}
+
+// With closed, consistently oriented edges the triangles around every vertex must form
+// one fan; two fans meeting at a vertex (a pinch) pass the edge test but are not manifold.
+// Each triangle (a, b, c) contributes the link step b -> c at a, c -> a at b, a -> b at c.
+function findPinchedVertex(indices, vertexCount) {
+  const links = Array.from({ length: vertexCount }, () => new Map());
+  for (let offset = 0; offset + 2 < indices.length; offset += 3) {
+    const [a, b, c] = indices.slice(offset, offset + 3);
+    if (![a, b, c].every((id) => Number.isInteger(id) && id >= 0 && id < vertexCount)) continue;
+    links[a].set(b, c);
+    links[b].set(c, a);
+    links[c].set(a, b);
+  }
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    const link = links[vertex];
+    if (link.size === 0) continue;
+    const start = link.keys().next().value;
+    let steps = 0;
+    let current = start;
+    do {
+      current = link.get(current);
+      steps += 1;
+    } while (current !== undefined && current !== start && steps <= link.size);
+    if (current !== start || steps !== link.size) return vertex;
+  }
+  return null;
 }
 
 function faceComponents(triangleCount, edgeMap) {

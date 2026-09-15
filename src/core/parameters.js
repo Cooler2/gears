@@ -20,7 +20,7 @@ export function validateDescription(input) {
 
   validateStatic(input, diagnostics);
   if (diagnostics.some((item) => item.severity === "error")) {
-    return { ok: false, schemaVersion: 1, normalized: null, derived: null, diagnostics };
+    return { ok: false, schemaVersion: 1, normalized: null, derived: null, anchors: null, diagnostics };
   }
 
   const normalized = normalize(input);
@@ -33,7 +33,34 @@ export function validateDescription(input) {
     schemaVersion: 1,
     normalized: ok ? normalized : null,
     derived: ok ? derived : null,
+    anchors: ok ? buildAnchors(normalized, derived) : null,
     diagnostics
+  };
+}
+
+function buildAnchors(input, derived) {
+  const halfWidth = input.rim.toothedWidth / 2;
+  return {
+    axis: { origin: [0, 0, 0], direction: [0, 0, 1] },
+    radii: {
+      bore: derived.boreRadius,
+      hub: derived.hubRadius,
+      rimInner: derived.rimInnerRadius,
+      grooveRoot: derived.grooveRootRadius,
+      outside: derived.outsideRadius,
+      pitch: derived.pitchRadius
+    },
+    zLevels: {
+      lowerHub: derived.hubLowerZ,
+      // far face of the flange, null without it
+      lowerFlange: input.flanges.lower ? -halfWidth - input.flanges.lower.axialThickness : null,
+      rimLower: -halfWidth,
+      webLower: derived.webLowerZ,
+      webUpper: derived.webUpperZ,
+      rimUpper: halfWidth,
+      upperFlange: input.flanges.upper ? halfWidth + input.flanges.upper.axialThickness : null,
+      upperHub: derived.hubUpperZ
+    }
   };
 }
 
@@ -91,7 +118,7 @@ function validateRelations(input, derived, diagnostics) {
   if (derived.hubRadius - derived.boreRadius < 1) {
     diagnostics.push(diagnostic("E_HUB_WALL", "error", "description", ["/hub/boreDiameter", "/hub/outerDiameter"]));
   }
-  if (derived.rimInnerRadius - derived.hubRadius < 1) {
+  if (derived.rimInnerRadius - derived.hubRadius < minimumWebSpan(input.web.type)) {
     diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", "/rim/toothCount"]));
   }
   if (derived.webLowerZ < -input.rim.toothedWidth / 2 || derived.webUpperZ > input.rim.toothedWidth / 2) {
@@ -105,6 +132,12 @@ function validateRelations(input, derived, diagnostics) {
       diagnostics.push(diagnostic("E_SPOKE_OVERLAP", "error", "description", ["/web/count", "/web/width", "/web/filletRadius", "/hub/outerDiameter"]));
     }
   }
+}
+
+// a solid web is plain material, so it only has to keep the hub and rim polygons apart
+// (0.5 is twice the largest maxChordError); spokes need room for two fillets
+function minimumWebSpan(webType) {
+  return webType === "spokes" ? 1 : 0.5;
 }
 
 function addWarnings(input, derived, diagnostics) {
@@ -231,7 +264,7 @@ function schemaError(diagnostics, path, rule, details) {
 
 function failedSchema(diagnostics, path, rule) {
   schemaError(diagnostics, path, rule);
-  return { ok: false, schemaVersion: 1, normalized: null, derived: null, diagnostics };
+  return { ok: false, schemaVersion: 1, normalized: null, derived: null, anchors: null, diagnostics };
 }
 
 function thin(path) {
