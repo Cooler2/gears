@@ -100,10 +100,11 @@ export const FIELDS = [
   },
   {
     path: "/rim/radialThickness", group: "rim", schema: ["rimPlacement", "radialThickness"], applies: hasWeb,
-    label: (description) => `Толщина ${rimWords(description).bodyOf}`, symbol: "T_r", unit: "мм",
+    // a radial size: "width" and "thickness" are both read as the size along the axis
+    label: (description) => isIdler(description) ? "Стенка обода" : isGear(description) ? "Обод под зубьями" : "Обод под канавками", symbol: "T_r", unit: "мм",
     hint: (description) => isIdler(description)
-      ? "Кольцо материала под поверхностью обода, внутрь до полотна или спиц."
-      : `Кольцо материала под зубьями: от ${isGear(description) ? "окружности впадин" : "дна канавок"} внутрь до полотна или спиц.`
+      ? "Кольцо материала под поверхностью обода, по радиусу внутрь до полотна или спиц."
+      : `Кольцо материала под ${isGear(description) ? "зубьями" : "канавками"}: по радиусу от ${isGear(description) ? "окружности впадин" : "дна канавок"} внутрь до полотна или спиц.`
   },
   {
     path: "/flanges/lower", group: "flanges", kind: "toggle",

@@ -235,13 +235,13 @@ test("each kind has valid defaults, variants, its own rim fields and words", asy
   const rim = GROUPS.find(({ id }) => id === "rim");
   assert.equal(groupTitle(rim, timing), "Ремень и зубья");
   assert.equal(groupTitle(rim, idler), "Ремень и обод");
-  assert.equal(fieldLabel(FIELD_BY_PATH.get("/rim/radialThickness"), idler), "Толщина обода");
+  assert.equal(fieldLabel(FIELD_BY_PATH.get("/rim/radialThickness"), idler), "Стенка обода");
   // a smooth pulley is never explained with teeth
   for (const field of FIELDS.filter((item) => fieldsOf(item.group, idler).includes(item))) {
     assert.ok(!/зуб|венц|канав/i.test(fieldLabel(field, idler) + fieldHint(field, idler)), field.path);
   }
   const noInterior = validateDescription(await readJson("../examples/invalid/idler-no-interior.json")).diagnostics;
-  assert.match(diagnosticText(noInterior.find(({ code }) => code === "E_RIM_NO_INTERIOR")), /^Обод слишком толстый/);
+  assert.match(diagnosticText(noInterior.find(({ code }) => code === "E_RIM_NO_INTERIOR")), /^Стенка обода слишком толстая/);
   assert.match(diagnosticText(noInterior.find(({ code }) => code === "E_RADIAL_ORDER")), /больше диаметр обода/);
   const fillet = { code: "E_SPOKE_FILLET", paths: ["/web/filletRadius"], details: { maxByWidth: 1, maxBySpan: 2 } };
   assert.match(diagnosticText(fillet, idler), /втулкой и ободом/);
