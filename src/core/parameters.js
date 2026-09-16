@@ -1,27 +1,35 @@
-import { buildGt2Contour } from "./contours.js";
+import { boreExtents, buildGt2Contour } from "./contours.js";
 
-const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "generation"];
+const SCHEMA_VERSION = 2;
+const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "bore", "generation"];
 const RIM_FIELDS = ["profile", "toothCount", "toothedWidth", "radialThickness"];
 const FLANGES_FIELDS = ["lower", "upper"];
 const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
 const SOLID_WEB_FIELDS = ["type", "axialThickness", "axialOffset"];
 const SPOKE_WEB_FIELDS = [...SOLID_WEB_FIELDS, "count", "width", "filletRadius"];
-const HUB_FIELDS = ["boreDiameter", "outerDiameter", "lowerExtension", "upperExtension"];
+const HUB_FIELDS = ["outerDiameter", "lowerExtension", "upperExtension"];
+const BORE_FIELDS = {
+  round: ["shape", "diameter"],
+  polygon: ["shape", "diameter", "sides"],
+  dFlat: ["shape", "diameter", "flatDistance"],
+  keyed: ["shape", "diameter", "keyWidth", "keyDepth"]
+};
 const GENERATION_FIELDS = ["maxChordError"];
 const THIN_FEATURE = 1.2; // print recommendation, mm
 
-export function validateDescription(input) {
+export function validateDescription(original) {
   const diagnostics = [];
-  if (!isRecord(input)) {
+  if (!isRecord(original)) {
     return failedSchema(diagnostics, "", "object");
   }
-  if (input.schemaVersion !== 1) {
+  const input = upgradeDescription(original);
+  if (input.schemaVersion !== SCHEMA_VERSION) {
     diagnostics.push(diagnostic("E_SCHEMA_VERSION", "error", "description", ["/schemaVersion"]));
   }
 
   validateStatic(input, diagnostics);
   if (diagnostics.some((item) => item.severity === "error")) {
-    return { ok: false, schemaVersion: 1, normalized: null, derived: null, anchors: null, diagnostics };
+    return { ok: false, schemaVersion: SCHEMA_VERSION, normalized: null, derived: null, anchors: null, diagnostics };
   }
 
   // A structurally valid description is normalized even when relation rules fail:
@@ -32,12 +40,29 @@ export function validateDescription(input) {
   addWarnings(normalized, derived, diagnostics);
   return {
     ok: !diagnostics.some((item) => item.severity === "error"),
-    schemaVersion: 1,
+    schemaVersion: SCHEMA_VERSION,
     normalized,
     derived,
     anchors: buildAnchors(normalized, derived),
     diagnostics
   };
+}
+
+/**
+ * Version 1 kept a round bore as hub.boreDiameter. Such a description is read as
+ * version 2 with bore.shape "round"; anything else is returned unchanged, and the
+ * argument itself is never modified.
+ */
+export function upgradeDescription(input) {
+  if (!isRecord(input) || input.schemaVersion !== 1 || !isRecord(input.hub) || !Object.hasOwn(input.hub, "boreDiameter")) return input;
+  const { boreDiameter, ...hub } = input.hub;
+  const upgraded = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (key === "schemaVersion") upgraded.schemaVersion = SCHEMA_VERSION;
+    else if (key === "hub") Object.assign(upgraded, { hub, bore: { shape: "round", diameter: boreDiameter } });
+    else upgraded[key] = value;
+  }
+  return upgraded;
 }
 
 function buildAnchors(input, derived) {
@@ -96,11 +121,23 @@ function validateStatic(input, diagnostics) {
   } else schemaError(diagnostics, "/web", "object");
 
   if (exactObject(input.hub, HUB_FIELDS, "/hub", diagnostics)) {
-    numberRange(input.hub.boreDiameter, 0.5, 50, "/hub/boreDiameter", diagnostics);
     numberRange(input.hub.outerDiameter, 2, 100, "/hub/outerDiameter", diagnostics);
     numberRange(input.hub.lowerExtension, 0, 50, "/hub/lowerExtension", diagnostics);
     numberRange(input.hub.upperExtension, 0, 50, "/hub/upperExtension", diagnostics);
   }
+  if (isRecord(input.bore)) {
+    const fields = BORE_FIELDS[input.bore.shape] ?? BORE_FIELDS.round;
+    if (exactObject(input.bore, fields, "/bore", diagnostics)) {
+      enumeration(input.bore.shape, Object.keys(BORE_FIELDS), "/bore/shape", diagnostics);
+      numberRange(input.bore.diameter, 0.5, 50, "/bore/diameter", diagnostics);
+      if (input.bore.shape === "polygon") integerRange(input.bore.sides, 3, 12, "/bore/sides", diagnostics);
+      if (input.bore.shape === "dFlat") numberRange(input.bore.flatDistance, 0.3, 50, "/bore/flatDistance", diagnostics);
+      if (input.bore.shape === "keyed") {
+        numberRange(input.bore.keyWidth, 0.3, 20, "/bore/keyWidth", diagnostics);
+        numberRange(input.bore.keyDepth, 0.2, 10, "/bore/keyDepth", diagnostics);
+      }
+    }
+  } else schemaError(diagnostics, "/bore", "object");
   if (exactObject(input.generation, GENERATION_FIELDS, "/generation", diagnostics)) {
     numberRange(input.generation.maxChordError, 0.01, 0.25, "/generation/maxChordError", diagnostics);
   }
@@ -120,9 +157,19 @@ function validateRelations(input, derived, diagnostics) {
     diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", ["/rim/toothCount", "/rim/radialThickness"],
       { rimInnerRadius: derived.rimInnerRadius }));
   }
-  if (derived.hubRadius - derived.boreRadius < 1) {
-    diagnostics.push(diagnostic("E_HUB_WALL", "error", "description", ["/hub/boreDiameter", "/hub/outerDiameter"],
-      { wall: derived.hubRadius - derived.boreRadius, minimum: 1 }));
+  const { bore } = input;
+  // the flat must leave the axis inside the bore, or the bore is not a loop around it
+  if (bore.shape === "dFlat" && !(bore.flatDistance > bore.diameter / 2 && bore.flatDistance < bore.diameter)) {
+    diagnostics.push(diagnostic("E_BORE_FLAT", "error", "description", ["/bore/flatDistance", "/bore/diameter"],
+      { minimum: bore.diameter / 2, maximum: bore.diameter }));
+  }
+  if (bore.shape === "keyed" && bore.keyWidth >= bore.diameter) {
+    diagnostics.push(diagnostic("E_BORE_KEY", "error", "description", ["/bore/keyWidth", "/bore/diameter"],
+      { maximum: bore.diameter }));
+  }
+  if (derived.hubRadius - derived.boreOuterRadius < 1) {
+    diagnostics.push(diagnostic("E_HUB_WALL", "error", "description", [...borePaths(bore), "/hub/outerDiameter"],
+      { wall: derived.hubRadius - derived.boreOuterRadius, minimum: 1 }));
   }
   if (span < minimumWebSpan(input.web.type)) {
     diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", "/rim/toothCount"],
@@ -150,6 +197,12 @@ function validateRelations(input, derived, diagnostics) {
   }
 }
 
+/** Bore fields that set its farthest point from the axis. */
+function borePaths(bore) {
+  if (bore.shape === "keyed") return ["/bore/diameter", "/bore/keyWidth", "/bore/keyDepth"];
+  return ["/bore/diameter"];
+}
+
 // a solid web is plain material, so it only has to keep the hub and rim polygons apart
 // (0.5 is twice the largest maxChordError); spokes need room for two fillets
 function minimumWebSpan(webType) {
@@ -157,7 +210,7 @@ function minimumWebSpan(webType) {
 }
 
 function addWarnings(input, derived, diagnostics) {
-  const hubWall = derived.hubRadius - derived.boreRadius;
+  const hubWall = derived.hubRadius - derived.boreOuterRadius;
   if (input.rim.radialThickness < THIN_FEATURE) diagnostics.push(thin("/rim/radialThickness", input.rim.radialThickness));
   if (input.web.axialThickness < THIN_FEATURE) diagnostics.push(thin("/web/axialThickness", input.web.axialThickness));
   if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
@@ -170,7 +223,8 @@ function derive(input) {
   const outsideRadius = pitchRadius - 0.254;
   const grooveRootRadius = outsideRadius - 0.75;
   const rimInnerRadius = grooveRootRadius - input.rim.radialThickness;
-  const boreRadius = input.hub.boreDiameter / 2;
+  const boreRadius = input.bore.diameter / 2;
+  const bore = boreExtents(input.bore);
   const hubRadius = input.hub.outerDiameter / 2;
   const halfWidth = input.rim.toothedWidth / 2;
   const webLowerZ = input.web.axialOffset - input.web.axialThickness / 2;
@@ -190,6 +244,8 @@ function derive(input) {
     grooveRootRadius,
     rimInnerRadius,
     boreRadius,
+    boreOuterRadius: bore.outerRadius,
+    boreExtentX: { positive: bore.positiveX, negative: bore.negativeX },
     hubRadius,
     webLowerZ,
     webUpperZ,
@@ -219,8 +275,10 @@ function normalize(input) {
     width: input.web.width,
     filletRadius: input.web.filletRadius
   });
+  const bore = { shape: input.bore.shape, diameter: input.bore.diameter };
+  for (const field of BORE_FIELDS[input.bore.shape].slice(2)) bore[field] = input.bore[field];
   return {
-    schemaVersion: 1,
+    schemaVersion: SCHEMA_VERSION,
     kind: "timingPulley",
     units: "mm",
     rim: {
@@ -232,11 +290,11 @@ function normalize(input) {
     flanges: { lower: flange(input.flanges.lower), upper: flange(input.flanges.upper) },
     web,
     hub: {
-      boreDiameter: input.hub.boreDiameter,
       outerDiameter: input.hub.outerDiameter,
       lowerExtension: input.hub.lowerExtension,
       upperExtension: input.hub.upperExtension
     },
+    bore,
     generation: { maxChordError: input.generation.maxChordError }
   };
 }
@@ -281,7 +339,7 @@ function schemaError(diagnostics, path, rule, details) {
 
 function failedSchema(diagnostics, path, rule) {
   schemaError(diagnostics, path, rule);
-  return { ok: false, schemaVersion: 1, normalized: null, derived: null, anchors: null, diagnostics };
+  return { ok: false, schemaVersion: SCHEMA_VERSION, normalized: null, derived: null, anchors: null, diagnostics };
 }
 
 function thin(path, value) {

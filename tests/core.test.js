@@ -55,7 +55,7 @@ test("supported tooth-count and placement boundaries build closed meshes", async
   minimum.rim.radialThickness = 1;
   minimum.rim.toothedWidth = 2;
   minimum.web.axialThickness = 2;
-  minimum.hub.boreDiameter = 0.5;
+  minimum.bore.diameter = 0.5;
   minimum.hub.outerDiameter = 2.5;
   minimum.generation.maxChordError = 0.25;
   const maximum = structuredClone(base);
@@ -64,7 +64,7 @@ test("supported tooth-count and placement boundaries build closed meshes", async
   maximum.rim.radialThickness = 25;
   maximum.web.axialThickness = 1;
   maximum.web.axialOffset = 24.5;
-  maximum.hub.boreDiameter = 0.5;
+  maximum.bore.diameter = 0.5;
   maximum.hub.outerDiameter = 2.5;
   maximum.generation.maxChordError = 0.01;
   for (const input of [minimum, maximum]) {
@@ -79,7 +79,7 @@ test("supported tooth-count and placement boundaries build closed meshes", async
 test("concave rim caps stay outward across representative tooth counts", async () => {
   const base = await readJson("../examples/valid/solid-basic.json");
   base.rim.radialThickness = 1;
-  base.hub.boreDiameter = 0.5;
+  base.bore.diameter = 0.5;
   base.hub.outerDiameter = 2.5;
   for (const toothCount of [14, 15, 16, 20, 24, 40, 60, 80, 120]) {
     base.rim.toothCount = toothCount;
@@ -126,6 +126,8 @@ test("12 and 13 grooves stay below the supported tooth-count range", async () =>
 test("cross-field invalid examples return their documented diagnostics", async () => {
   const cases = {
     "hub-wall.json": "E_HUB_WALL",
+    "bore-flat.json": "E_BORE_FLAT",
+    "bore-key.json": "E_BORE_KEY",
     "radial-order.json": "E_RADIAL_ORDER",
     "web-outside-rim.json": "E_WEB_AXIAL_RANGE",
     "spoke-overlap.json": "E_SPOKE_OVERLAP",
@@ -156,6 +158,47 @@ test("relation diagnostics report the compared quantities", async () => {
   assert.ok(overlap.details.required >= overlap.details.available);
 });
 
+test("bore rules keep the axis inside and measure the hub wall at the farthest point", async () => {
+  const input = await readJson("../examples/valid/hex-bore.json");
+  input.hub.outerDiameter = 10; // R_h = 5
+  const check = (bore) => validateDescription({ ...input, bore }).diagnostics.filter(({ severity }) => severity === "error");
+
+  for (const flatDistance of [2.5, 5]) assert.deepEqual(check({ shape: "dFlat", diameter: 5, flatDistance }).map(({ code }) => code), ["E_BORE_FLAT"], `s = ${flatDistance}`);
+  assert.deepEqual(check({ shape: "dFlat", diameter: 5, flatDistance: 2.51 }), []);
+  assert.deepEqual(check({ shape: "keyed", diameter: 5, keyWidth: 5, keyDepth: 0.5 }).map(({ code }) => code), ["E_BORE_KEY"]);
+
+  // a polygon diameter is across corners: 7 leaves a wall of 1.5, 10 leaves none
+  assert.deepEqual(check({ shape: "polygon", diameter: 7, sides: 4 }), []);
+  const triangle = check({ shape: "polygon", diameter: 10, sides: 3 })[0];
+  assert.equal(triangle.code, "E_HUB_WALL");
+  assert.deepEqual(triangle.paths, ["/bore/diameter", "/hub/outerDiameter"]);
+  assert.ok(Math.abs(triangle.details.wall) < 1e-12);
+  // the keyway corner (3.9, ±1) is 4.03 from the axis
+  const keyed = check({ shape: "keyed", diameter: 5, keyWidth: 2, keyDepth: 1.4 })[0];
+  assert.deepEqual(keyed.paths, ["/bore/diameter", "/bore/keyWidth", "/bore/keyDepth", "/hub/outerDiameter"]);
+  assert.ok(Math.abs(keyed.details.wall - (5 - Math.hypot(3.9, 1))) < 1e-12);
+
+  const { derived } = validateDescription({ ...input, bore: { shape: "polygon", diameter: 5, sides: 5 } });
+  assert.equal(derived.boreOuterRadius, 2.5);
+  assert.deepEqual(derived.boreExtentX, { positive: 2.5 * Math.cos(Math.PI / 5), negative: 2.5 }, "an odd polygon has a vertex at −X");
+});
+
+test("a version 1 description is read as version 2 with a round bore", async () => {
+  const current = await readJson("../examples/valid/spokes-flanged.json");
+  const { bore, ...rest } = current;
+  const legacy = { ...rest, schemaVersion: 1, hub: { boreDiameter: bore.diameter, ...current.hub } };
+  const snapshot = structuredClone(legacy);
+  const result = generatePulley(legacy);
+  assert.deepEqual(legacy, snapshot, "the input is not modified");
+  assert.deepEqual(result.normalized, current);
+  assert.deepEqual(Object.keys(result.normalized), Object.keys(current), "bore follows hub");
+  assert.deepEqual(result.mesh, generatePulley(current).mesh);
+  // version 2 with the old field is still strict
+  const mixed = { ...structuredClone(current), hub: { ...current.hub, boreDiameter: 5 } };
+  assert.ok(validateDescription(mixed).diagnostics.some(({ paths }) => paths.includes("/hub/boreDiameter")));
+  assert.ok(validateDescription({ ...current, schemaVersion: 3 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+});
+
 test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
   const solid = await readJson("../examples/valid/trial-20t.json");
   const rimInnerRadius = 20 / Math.PI - 0.254 - 0.75 - solid.rim.radialThickness;
@@ -175,16 +218,16 @@ test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
 test("validation is finite, strict, and does not mutate its input", async () => {
   const input = await readJson("../examples/valid/solid-basic.json");
   const snapshot = structuredClone(input);
-  input.hub.boreDiameter = NaN;
+  input.bore.diameter = NaN;
   input.web.axialThickness = Infinity;
   input.rim.extra = 1;
   const result = validateDescription(input);
   assert.equal(result.ok, false);
-  for (const path of ["/hub/boreDiameter", "/web/axialThickness", "/rim/extra"]) {
+  for (const path of ["/bore/diameter", "/web/axialThickness", "/rim/extra"]) {
     assert.ok(result.diagnostics.some(({ code, paths }) => code === "E_SCHEMA_VALUE" && paths.includes(path)), path);
   }
   delete input.rim.extra;
-  input.hub.boreDiameter = snapshot.hub.boreDiameter;
+  input.bore.diameter = snapshot.bore.diameter;
   input.web.axialThickness = snapshot.web.axialThickness;
   assert.deepEqual(input, snapshot);
 });

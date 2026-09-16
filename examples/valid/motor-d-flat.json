@@ -4,9 +4,9 @@
   "units": "mm",
   "rim": {
     "profile": "gt2-2mm-experimental-v1",
-    "toothCount": 20,
+    "toothCount": 30,
     "toothedWidth": 7,
-    "radialThickness": 1
+    "radialThickness": 1.5
   },
   "flanges": {
     "lower": {
@@ -24,12 +24,12 @@
     "axialOffset": 0
   },
   "hub": {
-    "outerDiameter": 7.4,
-    "lowerExtension": 1,
-    "upperExtension": 1
+    "outerDiameter": 12,
+    "lowerExtension": 5,
+    "upperExtension": 0
   },
-  "bore": { "shape": "round", "diameter": 5 },
+  "bore": { "shape": "dFlat", "diameter": 5.2, "flatDistance": 4.7 },
   "generation": {
-    "maxChordError": 0.02
+    "maxChordError": 0.03
   }
 }

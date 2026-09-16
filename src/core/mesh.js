@@ -1,4 +1,4 @@
-import { buildGt2Contour, buildMarkedCircle, circleSegmentCount, rotateContour } from "./contours.js";
+import { buildBoreContour, buildGt2Contour, buildMarkedCircle, circleSegmentCount, rotateContour } from "./contours.js";
 import { createMeshBuilder, isSimplePolygon, MeshBuildError } from "./mesh-builder.js";
 import { layoutSpokes } from "./spokes.js";
 
@@ -12,7 +12,8 @@ const PROFILE_START = 9;
  *
  * Every surface is either a vertical wall between two copies of one XY contour
  * or a flat face at one Z level (see mesh-builder.js). From the axis outwards
- * the contours are: bore R_b, hub R_h, rim inner circle R_i, tooth profile and
+ * the contours are: the bore (a circle or a shaped loop, see buildBoreContour),
+ * hub R_h, rim inner circle R_i, tooth profile and
  * the flange edges R_o + E_f. Axially the rim spans [−W/2, +W/2], flanges add
  * their thickness outside it, the hub spans [hubLowerZ, hubUpperZ] and the web
  * [webLowerZ, webUpperZ]. Between the web levels the hub cylinder and the rim
@@ -21,7 +22,7 @@ const PROFILE_START = 9;
  */
 export function buildPulleyMesh(description, derived) {
   const { rim, flanges, web } = description;
-  const { boreRadius, hubRadius, rimInnerRadius, outsideRadius, webLowerZ, webUpperZ, hubLowerZ, hubUpperZ } = derived;
+  const { hubRadius, rimInnerRadius, outsideRadius, webLowerZ, webUpperZ, hubLowerZ, hubUpperZ } = derived;
   const maxChordError = description.generation.maxChordError;
   const rimLowerZ = -rim.toothedWidth / 2;
   const rimUpperZ = rim.toothedWidth / 2;
@@ -53,11 +54,15 @@ export function buildPulleyMesh(description, derived) {
     axisAngle + layout.rimTangentAngle
   ]) : [];
 
+  const bore = buildBoreContour(description.bore, maxChordError);
+  // after the spoke marks, so their indices stay 3k..3k+2
+  const hubBoreMarks = [...hubMarks, ...bore.corners];
+
   const circle = (radius, marks) => buildMarkedCircle(radius, circleSegmentCount(radius, maxChordError), marks);
   const flangeEdge = (flange) => flange ? circle(outsideRadius + flange.radialExtension, halfPitchAngles) : null;
   const contours = {
-    bore: circle(boreRadius, []),
-    hub: circle(hubRadius, hubMarks),
+    bore,
+    hub: circle(hubRadius, hubBoreMarks),
     rimInner: circle(rimInnerRadius, [...halfPitchAngles, ...rimSpokeMarks]),
     profile: { points: rotateContour(buildGt2Contour(rim.toothCount, outsideRadius), PROFILE_START) },
     lowerFlange: flangeEdge(flanges.lower),

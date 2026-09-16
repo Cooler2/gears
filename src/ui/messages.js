@@ -3,7 +3,7 @@
 import { formatNumber as n } from "./format.js";
 
 const TEXTS = {
-  E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает только schemaVersion 1.",
+  E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion 1 и 2.",
   E_SCHEMA_VALUE: ({ rule, minimum, maximum }) => {
     if (rule === "numberRange") return `Нужно число от ${n(minimum)} до ${n(maximum)}.`;
     if (rule === "integerRange") return `Нужно целое число от ${minimum} до ${maximum}.`;
@@ -14,8 +14,12 @@ const TEXTS = {
   E_RIM_NO_INTERIOR: ({ rimInnerRadius }) =>
     `Венец слишком толстый для такого числа зубьев: внутри не остаётся места (внутренний радиус ${n(rimInnerRadius)} мм).`,
   E_HUB_WALL: ({ wall, minimum }) =>
-    `Стенка втулки вокруг отверстия ${n(wall)} мм, нужно не меньше ${n(minimum)} мм. Увеличьте диаметр втулки или уменьшите отверстие.`,
-  E_RADIAL_ORDER: ({ span, minimum, maxHubDiameter }) =>
+    `Стенка втулки вокруг отверстия в самом тонком месте ${n(wall)} мм, нужно не меньше ${n(minimum)} мм. Увеличьте диаметр втулки или уменьшите отверстие.`,
+  E_BORE_FLAT: ({ minimum, maximum }) =>
+    `Размер по лыске должен быть больше половины диаметра (${n(minimum)} мм) и меньше диаметра (${n(maximum)} мм): иначе лыска срезает ось или не касается отверстия.`,
+  E_BORE_KEY: ({ maximum }) =>
+    `Паз должен быть уже отверстия: ширина паза — меньше ${n(maximum)} мм.`,
+  E_RADIAL_ORDER:({ span, minimum, maxHubDiameter }) =>
     `Между втулкой и венцом ${n(span)} мм, нужно не меньше ${n(minimum)} мм. ` +
     (maxHubDiameter > 0
       ? `Диаметр втулки — не больше ${n(maxHubDiameter)} мм, или возьмите больше зубьев либо тоньше венец.`

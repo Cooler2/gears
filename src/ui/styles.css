@@ -349,6 +349,8 @@ button {
 
 .segmented {
   display: inline-flex;
+  flex-wrap: wrap; /* four bore shapes do not fit a narrow form in one row */
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
@@ -369,6 +371,7 @@ button {
 .segmented span {
   display: block;
   padding: 7px 14px;
+  white-space: nowrap;
 }
 
 .segmented input:checked + span {
@@ -640,6 +643,21 @@ figcaption {
   stroke: var(--ink);
   stroke-width: 1px;
   stroke-dasharray: 4 3;
+}
+
+.bore-circle {
+  stroke: currentColor;
+  stroke-width: 0.8px;
+  stroke-dasharray: 4 3;
+  fill: none;
+}
+
+.detail-edge {
+  stroke: var(--muted);
+  stroke-width: 1px;
+  stroke-dasharray: 8 3 2 3;
+  fill: none;
+  pointer-events: none;
 }
 
 .dim { cursor: pointer; color: var(--ink); }

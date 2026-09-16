@@ -1,14 +1,19 @@
 // Form state: the contract description plus values remembered for hidden parts.
 //
 // The description itself follows the contract: switching the web to solid drops
-// the spoke fields and removing a flange stores null. So that such a switch does
-// not lose what the user typed, the last spoke fields and flanges are kept in
-// `remembered` and restored when the part comes back. Pure functions, no DOM.
+// the spoke fields, removing a flange stores null and a bore keeps only the fields
+// of its shape. So that such a switch does not lose what the user typed, the last
+// spoke fields, flanges and bore sizes are kept in `remembered` and restored when
+// the part comes back. Pure functions, no DOM.
+
+import { upgradeDescription } from "../core/parameters.js";
+
+const BORE_EXTRAS = { round: [], polygon: ["sides"], dFlat: ["flatDistance"], keyed: ["keyWidth", "keyDepth"] };
 
 export function defaultDescription(schema) {
   const value = (definition, property) => schema.$defs[definition].properties[property].default;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "timingPulley",
     units: "mm",
     rim: {
@@ -20,11 +25,11 @@ export function defaultDescription(schema) {
     flanges: { lower: null, upper: null },
     web: { type: "solid", axialThickness: value("webPlacement", "axialThickness"), axialOffset: value("webPlacement", "axialOffset") },
     hub: {
-      boreDiameter: value("hub", "boreDiameter"),
       outerDiameter: value("hub", "outerDiameter"),
       lowerExtension: value("hub", "lowerExtension"),
       upperExtension: value("hub", "upperExtension")
     },
+    bore: { shape: "round", diameter: value("borePlacement", "diameter") },
     generation: { maxChordError: value("generation", "maxChordError") }
   };
 }
@@ -36,7 +41,8 @@ export function createState(schema) {
     description: defaultDescription(schema),
     remembered: {
       spokes: { count: value("spokeWeb", "count"), width: value("spokeWeb", "width"), filletRadius: value("spokeWeb", "filletRadius") },
-      flanges: { lower: flange(), upper: flange() }
+      flanges: { lower: flange(), upper: flange() },
+      bore: Object.fromEntries(Object.values(BORE_EXTRAS).flat().map((field) => [field, value("borePlacement", field)]))
     }
   };
 }
@@ -80,15 +86,39 @@ export function setFlange(state, side, enabled) {
   return next;
 }
 
+export function setBoreShape(state, shape) {
+  const { bore } = state.description;
+  if (bore.shape === shape) return state;
+  const next = structuredClone(state);
+  for (const field of BORE_EXTRAS[bore.shape]) next.remembered.bore[field] = bore[field];
+  next.description.bore = { shape, diameter: bore.diameter };
+  for (const field of BORE_EXTRAS[shape]) next.description.bore[field] = next.remembered.bore[field];
+  return next;
+}
+
 /** Replace the description (preset or file); parts it lacks keep their remembered values. */
 export function loadDescription(state, description) {
   const next = { description: structuredClone(description), remembered: structuredClone(state.remembered) };
-  const { web, flanges } = description;
+  const { web, flanges, bore } = description;
+  for (const field of BORE_EXTRAS[bore.shape] ?? []) next.remembered.bore[field] = bore[field];
   if (web.type === "spokes") next.remembered.spokes = { count: web.count, width: web.width, filletRadius: web.filletRadius };
   for (const side of ["lower", "upper"]) {
     if (flanges[side]) next.remembered.flanges[side] = structuredClone(flanges[side]);
   }
   return next;
+}
+
+/**
+ * Form state saved by an earlier version: a version 1 description is upgraded and
+ * sizes it could not remember come from the defaults. Null when it is not a state.
+ */
+export function restoreState(schema, saved) {
+  if (!saved?.description || !saved.remembered) return null;
+  const defaults = createState(schema).remembered;
+  return {
+    description: upgradeDescription(saved.description),
+    remembered: { ...defaults, ...saved.remembered, bore: { ...defaults.bore, ...saved.remembered.bore } }
+  };
 }
 
 /** Number typed by a person: accepts a decimal comma and a typographic minus; NaN otherwise. */

@@ -2,7 +2,8 @@
 //
 // Everything about a field that the contract already defines (limits, defaults,
 // integer or not) is read from the JSON Schema through `schema`; this file adds
-// only presentation: group, label, drawing symbol, hint and applicability.
+// only presentation: group, label, drawing symbol, hint and applicability. A label
+// or hint may be a function of the description when its meaning depends on it.
 // `schema: [def, property]` points at $defs[def].properties[property].
 
 export const GROUPS = [
@@ -10,11 +11,13 @@ export const GROUPS = [
   { id: "rim", title: "Ремень и зубья" },
   { id: "flanges", title: "Фланцы" },
   { id: "web", title: "Полотно и спицы" },
-  { id: "hub", title: "Втулка и вал" },
+  { id: "hub", title: "Втулка" },
+  { id: "bore", title: "Отверстие под вал" },
   { id: "generation", title: "Точность модели" }
 ];
 
 const isSpokes = (description) => description.web?.type === "spokes";
+const hasBore = (...shapes) => (description) => shapes.includes(description.bore?.shape);
 const hasFlange = (side) => (description) => Boolean(description.flanges?.[side]);
 
 export const FIELDS = [
@@ -93,11 +96,6 @@ export const FIELDS = [
     hint: "Плавный переход спицы во втулку и в венец. Не больше половины ширины спицы."
   },
   {
-    path: "/hub/boreDiameter", group: "hub", schema: ["hub", "boreDiameter"],
-    label: "Диаметр отверстия", symbol: "d", unit: "мм",
-    hint: "Круглое сквозное отверстие под вал. Зазор закладывайте сами: напечатанное отверстие обычно выходит меньше."
-  },
-  {
     path: "/hub/outerDiameter", group: "hub", schema: ["hub", "outerDiameter"],
     label: "Диаметр втулки", symbol: "D_h", unit: "мм",
     hint: "Наружный диаметр цилиндрической втулки вокруг отверстия."
@@ -113,6 +111,44 @@ export const FIELDS = [
     hint: "Выше верхнего торца зубчатой части. Ноль — вровень."
   },
   {
+    path: "/bore/shape", group: "bore", kind: "choice",
+    label: "Форма отверстия",
+    options: [
+      { value: "round", label: "Круглое" },
+      { value: "polygon", label: "Многоугольное" },
+      { value: "dFlat", label: "D-образное" },
+      { value: "keyed", label: "Со шпоночным пазом" }
+    ],
+    hint: "Сквозное отверстие под вал. Лыска, паз и одна грань многоугольника на чертеже смотрят вправо."
+  },
+  {
+    path: "/bore/diameter", group: "bore", schema: ["borePlacement", "diameter"],
+    label: (description) => description.bore?.shape === "polygon" ? "Диаметр описанной окружности" : "Диаметр отверстия", symbol: "d", unit: "мм",
+    hint: (description) => description.bore?.shape === "polygon"
+      ? "Окружность проходит через все вершины. При чётном числе граней это размер между противоположными углами."
+      : "Зазор закладывайте сами: напечатанное отверстие обычно выходит меньше."
+  },
+  {
+    path: "/bore/sides", group: "bore", schema: ["borePlacement", "sides"], applies: hasBore("polygon"),
+    label: "Число граней", symbol: "n",
+    hint: "Правильный многоугольник: 4 — квадрат, 6 — шестигранник."
+  },
+  {
+    path: "/bore/flatDistance", group: "bore", schema: ["borePlacement", "flatDistance"], applies: hasBore("dFlat"),
+    label: "Размер по лыске", symbol: "s", unit: "мм",
+    hint: "От лыски до противоположной стороны отверстия. Больше половины диаметра и меньше диаметра."
+  },
+  {
+    path: "/bore/keyWidth", group: "bore", schema: ["borePlacement", "keyWidth"], applies: hasBore("keyed"),
+    label: "Ширина паза", symbol: "b", unit: "мм",
+    hint: "Ширина шпонки плюс зазор. Меньше диаметра отверстия."
+  },
+  {
+    path: "/bore/keyDepth", group: "bore", schema: ["borePlacement", "keyDepth"], applies: hasBore("keyed"),
+    label: "Глубина паза", symbol: "t", unit: "мм",
+    hint: "От окружности отверстия до дна паза, по оси паза. В таблицах шпонок это глубина паза во втулке t₂."
+  },
+  {
     path: "/generation/maxChordError", group: "generation", schema: ["generation", "maxChordError"],
     label: "Допуск хорды", symbol: "ε", unit: "мм",
     hint: "На сколько отрезки сетки могут отходить от точной окружности. Меньше — глаже и тяжелее файл. Это настройка сетки, а не размер детали."
@@ -123,6 +159,10 @@ export const FIELD_BY_PATH = new Map(FIELDS.map((field) => [field.path, field]))
 
 export function fieldLabel(field, description) {
   return typeof field.label === "function" ? field.label(description) : field.label;
+}
+
+export function fieldHint(field, description) {
+  return typeof field.hint === "function" ? field.hint(description) : field.hint;
 }
 
 export function isApplicable(field, description) {

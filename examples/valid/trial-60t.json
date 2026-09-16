@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "timingPulley",
   "units": "mm",
   "rim": {
@@ -27,11 +27,11 @@
     "filletRadius": 1.5
   },
   "hub": {
-    "boreDiameter": 5,
     "outerDiameter": 13,
     "lowerExtension": 1,
     "upperExtension": 0
   },
+  "bore": { "shape": "round", "diameter": 5 },
   "generation": {
     "maxChordError": 0.03
   }

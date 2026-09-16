@@ -1,7 +1,7 @@
-import { buildGt2Contour } from "./contours.js";
+import { buildBoreContour, buildGt2Contour } from "./contours.js";
 import { layoutSpokes } from "./spokes.js";
 
-// fillets are drawn smoother than the mesh needs, independent of maxChordError
+// fillets and the bore are drawn smoother than the mesh needs, independent of maxChordError
 const DRAWING_CHORD_ERROR = 0.005;
 
 /**
@@ -10,6 +10,9 @@ const DRAWING_CHORD_ERROR = 0.005;
  * Works for every structurally valid description, including one that breaks a
  * relation rule, so a form can show the conflict. Coordinates follow the mesh:
  * millimetres, +Y up, angles clockwise from +Y.
+ *
+ * bore is the bore outline with the same orientation as the mesh loop: the flat,
+ * the keyway and one polygon side face +X.
  *
  * spokes is null for a solid web. Each spoke outline is a closed polygon from the
  * hub tangent point along the leading side to the rim and back along the trailing
@@ -22,6 +25,7 @@ export function buildPlanView(normalized, derived) {
   const { rim, web, flanges } = normalized;
   return {
     profile: buildGt2Contour(rim.toothCount, derived.outsideRadius),
+    bore: buildBoreContour(normalized.bore, DRAWING_CHORD_ERROR).points,
     radii: {
       bore: derived.boreRadius,
       hub: derived.hubRadius,

@@ -6,17 +6,17 @@
 // is also sent to the worker, which builds the mesh; its answer is shown only
 // while it still matches the current parameters, and only then STL is offered.
 // The form itself is rebuilt only when its structure changes (group, web type,
-// flange switch, loaded file), so typing keeps the caret.
+// flange switch, bore shape, loaded file), so typing keeps the caret.
 
 import { buildPlanView, validateDescription } from "../core/generate.js";
 import { exportBinaryStl } from "../export/stl.js";
 import { BuildClient } from "../worker/client.js";
 import { chordSummary, renderChord, renderPlan, renderSection } from "./drawings.js";
-import { FIELD_BY_PATH, GROUPS, fieldLabel, fieldSchema, fieldsOf, groupOfPath } from "./fields.js";
+import { FIELD_BY_PATH, GROUPS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath } from "./fields.js";
 import { escapeHtml, formatNumber, inputText, plural, symbolHtml } from "./format.js";
 import { diagnosticKind, diagnosticText } from "./messages.js";
 import { PRESETS } from "./presets.js";
-import { createState, getValue, loadDescription, parseNumber, setFlange, setValue, setWebType } from "./state.js";
+import { createState, getValue, loadDescription, parseNumber, restoreState as upgradeState, setBoreShape, setFlange, setValue, setWebType } from "./state.js";
 import { MeshViewer } from "./viewer.js";
 
 const STORAGE_KEY = "gears.pulley.form.v1";
@@ -37,7 +37,7 @@ const el = {
 
 let schema, presets;
 try {
-  schema = await fetchJson("../../schemas/pulley-v1.schema.json");
+  schema = await fetchJson("../../schemas/pulley-v2.schema.json");
   presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(`../../examples/valid/${preset.file}`) })));
 } catch (error) {
   $("#boot").className = "notice notice-error";
@@ -120,8 +120,7 @@ function saveState() {
 
 function restoreState() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved?.state?.description && saved.state.remembered ? saved.state : null;
+    return upgradeState(schema, JSON.parse(localStorage.getItem(STORAGE_KEY))?.state);
   } catch {
     return null;
   }
@@ -201,7 +200,7 @@ function numberMarkup(field, description) {
         value="${escapeHtml(inputText(getValue(description, field.path)))}" aria-describedby="${id}-hint ${id}-msg">
       ${field.unit ? `<span class="unit">${field.unit}</span>` : ""}
     </div>
-    <p class="field-hint" id="${id}-hint">${escapeHtml(field.hint)} <span class="range">Допустимо ${range}, по умолчанию ${formatNumber(limits.default)}${unit}.</span></p>
+    <p class="field-hint" id="${id}-hint">${escapeHtml(fieldHint(field, description))} <span class="range">Допустимо ${range}, по умолчанию ${formatNumber(limits.default)}${unit}.</span></p>
     <div class="field-msg" id="${id}-msg" aria-live="polite"></div>
   </div>`;
 }
@@ -212,7 +211,7 @@ function toggleMarkup(field, description) {
   return `<div class="field field-toggle" data-field="${field.path}">
     <label class="toggle" for="${id}"><input id="${id}" type="checkbox" data-path="${field.path}"${checked ? " checked" : ""} aria-describedby="${id}-hint">
       <span>${escapeHtml(fieldLabel(field, description))}</span></label>
-    <p class="field-hint" id="${id}-hint">${escapeHtml(field.hint)}</p>
+    <p class="field-hint" id="${id}-hint">${escapeHtml(fieldHint(field, description))}</p>
   </div>`;
 }
 
@@ -222,7 +221,7 @@ function choiceMarkup(field, description) {
   return `<fieldset class="field field-choice" data-field="${field.path}">
     <legend>${escapeHtml(fieldLabel(field, description))}</legend>
     <div class="segmented">${field.options.map((option) => `<label><input type="radio" name="${name}" value="${option.value}" data-path="${field.path}"${option.value === value ? " checked" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("")}</div>
-    <p class="field-hint">${escapeHtml(field.hint)}</p>
+    <p class="field-hint">${escapeHtml(fieldHint(field, description))}</p>
   </fieldset>`;
 }
 
@@ -234,7 +233,8 @@ function computedMarkup() {
     rim: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]],
     flanges: [["Диаметр нижнего фланца", derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], ["Диаметр верхнего фланца", derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], ["Полная высота детали", derived.bounds.max[2] - derived.bounds.min[2]]],
     web: [["Промежуток между втулкой и венцом", anchors.radii.rimInner - anchors.radii.hub], ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
-    hub: [["Стенка втулки", anchors.radii.hub - anchors.radii.bore], ["Втулка по высоте, от", derived.hubLowerZ], ["до", derived.hubUpperZ]],
+    hub: [["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius], ["Втулка по высоте, от", derived.hubLowerZ], ["до", derived.hubUpperZ]],
+    bore: boreRows(model),
     generation: []
   }[view.group].filter(([, value]) => typeof value === "number");
   if (view.group === "generation") {
@@ -244,6 +244,14 @@ function computedMarkup() {
   if (!rows.length) return "";
   return `<div class="computed"><h3>Вычисленные размеры</h3><dl>${rows.map(([name, value]) =>
     `<div><dt>${escapeHtml(name)}</dt><dd>${formatNumber(value)} мм</dd></div>`).join("")}</dl></div>`;
+}
+
+function boreRows({ normalized: { bore }, derived }) {
+  return [
+    bore.shape === "polygon" && [bore.sides % 2 ? "Диаметр вписанной окружности" : "Диаметр вписанной окружности, между гранями", bore.diameter * Math.cos(Math.PI / bore.sides)],
+    bore.shape === "keyed" && ["От стенки отверстия до дна паза, d + t", bore.diameter + bore.keyDepth],
+    ["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius]
+  ].filter(Boolean);
 }
 
 function presetCards() {
@@ -337,7 +345,8 @@ function renderDrawings() {
   const covered = (mine, other) => [...mine].every((path) => other.has(path));
   setLabelSpan(el.planFigure, covered(plan, section) ? CONTEXT_VIEW_SCALE : 1);
   setLabelSpan(el.sectionFigure, covered(section, plan) ? CONTEXT_VIEW_SCALE : 1);
-  el.planTag.textContent = model.plan.spokes?.schematic ? "спицы схематично: скругления не помещаются" : "в масштабе";
+  el.planTag.textContent = view.group === "bore" ? "втулка крупно, в масштабе"
+    : model.plan.spokes?.schematic ? "спицы схематично: скругления не помещаются" : "в масштабе";
   el.sectionTag.textContent = model.normalized.web.type === "spokes" ? "в масштабе, спицы — разрез по спице" : "в масштабе";
   el.chordFigure.hidden = view.group !== "generation";
   if (view.group === "generation") el.chord.innerHTML = renderChord(model, ctx);
@@ -350,7 +359,11 @@ function cropToContent(svg) {
   // measured without the focus style, so the enlarged label does not rescale the view on each focus change
   const focused = [...svg.querySelectorAll(".is-focus")];
   for (const node of focused) node.classList.remove("is-focus");
+  // getBBox ignores clipping: a detail is measured by its edge circle alone
+  const clipped = [...svg.querySelectorAll(".detail")];
+  for (const node of clipped) node.style.display = "none";
   const box = svg.getBBox();
+  for (const node of clipped) node.style.display = "";
   for (const node of focused) node.classList.add("is-focus");
   if (!box.width || !box.height) return; // not laid out: a hidden page keeps the full view
   const pad = label; // strokes and the focused label's growth are outside the box
@@ -488,6 +501,9 @@ el.form.addEventListener("change", (event) => {
     focusField(path);
   } else if (input.type === "radio" && path === "/web/type") {
     update(setWebType(state, input.value), { rebuildForm: true });
+    focusField(path);
+  } else if (input.type === "radio" && path === "/bore/shape") {
+    update(setBoreShape(state, input.value), { rebuildForm: true });
     focusField(path);
   }
 });

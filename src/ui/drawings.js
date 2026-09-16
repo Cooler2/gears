@@ -107,13 +107,19 @@ function part(ctx, group, d, { path = null, extra = "" } = {}) {
 
 // ---------------------------------------------------------------- plan view
 
-/** Cross-section perpendicular to the axis at the web, looking down (+Z towards the viewer). */
+/**
+ * Cross-section perpendicular to the axis at the web, looking down (+Z towards the viewer).
+ * For the bore group it is a detail: only a circle around the hub, at a larger scale.
+ */
 export function renderPlan(model, ctx) {
-  const { plan, normalized } = model;
+  const { plan, normalized, derived } = model;
   const r = plan.radii;
   const flangeRadius = Math.max(plan.flangeRadii.lower ?? 0, plan.flangeRadii.upper ?? 0);
-  const outer = Math.max(r.outside, flangeRadius);
-  const extent = outer * 1.45 + 1;
+  const whole = Math.max(r.outside, flangeRadius);
+  const hubSize = Math.max(r.hub, derived.boreOuterRadius);
+  const detail = ctx.group === "bore" ? Math.min(whole, Math.max(1.35 * hubSize, hubSize + 1.5)) : null;
+  const outer = detail ?? whole;
+  const extent = detail ? outer * 1.5 : outer * 1.45 + 1;
   const u = extent / 16;
   const out = [];
 
@@ -129,9 +135,13 @@ export function renderPlan(model, ctx) {
   } else if (rimInner > r.hub) {
     out.push(part(ctx, "web", circlePath(rimInner) + circlePath(r.hub), { path: "/web/type" }));
   }
-  if (r.hub > r.bore) out.push(part(ctx, "hub", circlePath(r.hub) + circlePath(r.bore)));
+  if (r.hub > r.bore) out.push(part(ctx, "hub", circlePath(r.hub) + polygonPath(plan.bore)));
+  if (detail) {
+    // parts are cut by the detail circle; getBBox ignores clipping, so the app measures the circle instead
+    out.splice(0, out.length, `<g class="detail" clip-path="url(#plan-detail)">${out.join("")}</g>`, `<path class="detail-edge" d="${circlePath(detail)}"/>`);
+  }
   out.push(`<path class="centre-line" d="M${P([-outer - u, 0])}L${P([outer + u, 0])}M${P([0, -outer - u])}L${P([0, outer + u])}"/>`);
-  out.push(`<path class="pitch-line" d="${circlePath(r.pitch)}"/>`);
+  if (!detail) out.push(`<path class="pitch-line" d="${circlePath(r.pitch)}"/>`);
 
   const { rim, web, hub } = normalized;
   const labelRadius = outer + 0.9 * u;
@@ -151,21 +161,71 @@ export function renderPlan(model, ctx) {
     label: add(mul(rimDirection, labelRadius), [0.3 * u, 0]), anchor: "start"
   }));
 
-  // bore and hub diameters on the left diagonals, labels led outside
-  for (const [path, radius, angle, value] of [
-    ["/hub/boreDiameter", r.bore, 5 * Math.PI / 4, hub.boreDiameter],
-    ["/hub/outerDiameter", r.hub, 7 * Math.PI / 4, hub.outerDiameter]
-  ]) {
-    const direction = polar(1, angle);
-    out.push(dimension(ctx, path, {
-      u, a: mul(direction, -radius), b: mul(direction, radius), value,
-      leader: [mul(direction, radius), mul(direction, labelRadius)],
-      label: add(mul(direction, labelRadius), [-0.3 * u, 0]), anchor: "end"
+  // hub diameter on the upper left diagonal, the label led outside
+  const hubDirection = polar(1, 7 * Math.PI / 4);
+  out.push(dimension(ctx, "/hub/outerDiameter", {
+    u, a: mul(hubDirection, -r.hub), b: mul(hubDirection, r.hub), value: hub.outerDiameter,
+    leader: [mul(hubDirection, r.hub), mul(hubDirection, labelRadius)],
+    label: add(mul(hubDirection, labelRadius), [-0.3 * u, 0]), anchor: "end"
+  }));
+
+  if (plan.spokes && web.type === "spokes") out.push(...spokeDimensions(ctx, plan, web, u, outer));
+  if (detail) out.push(...boreDimensions(ctx, model, u, outer));
+  const defs = detail ? `<clipPath id="plan-detail"><path d="${circlePath(detail)}"/></clipPath>` : "";
+  return svgRoot([-extent, -extent, 2 * extent, 2 * extent], u, out.join(""), "Поперечный разрез по полотну", defs);
+}
+
+/** Bore sizes on the hub detail; the flat and the keyway face +X, so d is measured vertically. */
+function boreDimensions(ctx, model, u, outer) {
+  const { bore } = model.normalized;
+  const radius = bore.diameter / 2;
+  const labelRadius = outer + 0.9 * u;
+  const out = [];
+
+  // d: a polygon and a keyway hide part of the circle, so it is drawn dashed
+  const top = [0, radius];
+  const diameterLabel = polar(labelRadius, -Math.PI / 5);
+  out.push(dimension(ctx, "/bore/diameter", {
+    u, a: [0, -radius], b: top, value: bore.diameter,
+    extra: ["polygon", "keyed"].includes(bore.shape) ? `<path class="bore-circle" d="${circlePath(radius)}"/>` : "",
+    leader: [top, diameterLabel], label: add(diameterLabel, [-0.3 * u, 0]), anchor: "end"
+  }));
+
+  if (bore.shape === "polygon") {
+    // n: a dot on every vertex, the label below the detail
+    const corners = Array.from({ length: bore.sides }, (_, k) => polar(model.derived.boreOuterRadius, Math.PI / 2 + Math.PI * (2 * k + 1) / bore.sides));
+    out.push(wrap(ctx, "/bore/sides", bore.sides,
+      corners.map((point) => `<path class="dim-dot" d="${circlePath(0.13 * u, point)}"/>`).join("") +
+      labelMarkup("/bore/sides", bore.sides, [0, -(outer + 1.4 * u)], "middle")));
+  }
+
+  if (bore.shape === "dFlat") {
+    // s along the X axis, from the far side of the circle to the flat
+    const sizeLabel = polar(labelRadius, 6 * Math.PI / 5);
+    out.push(dimension(ctx, "/bore/flatDistance", {
+      u, a: [-radius, 0], b: [bore.flatDistance - radius, 0], value: bore.flatDistance,
+      leader: [[-radius, 0], sizeLabel], label: add(sizeLabel, [-0.3 * u, 0]), anchor: "end"
     }));
   }
 
-  if (plan.spokes && web.type === "spokes") out.push(...spokeDimensions(ctx, plan, web, u, outer));
-  return svgRoot([-extent, -extent, 2 * extent, 2 * extent], u, out.join(""), "Поперечный разрез по полотну");
+  if (bore.shape === "keyed") {
+    const half = bore.keyWidth / 2;
+    const bottom = radius + bore.keyDepth;
+    // b just past the bottom of the keyway, t along the keyway axis from the circle
+    const widthX = bottom + 0.9 * u;
+    const widthLabel = polar(labelRadius, 3 * Math.PI / 10);
+    out.push(dimension(ctx, "/bore/keyWidth", {
+      u, a: [widthX, -half], b: [widthX, half], value: bore.keyWidth,
+      ext: [[[bottom + 0.2 * u, half], [widthX + 0.4 * u, half]], [[bottom + 0.2 * u, -half], [widthX + 0.4 * u, -half]]],
+      leader: [[widthX, half], widthLabel], label: add(widthLabel, [0.3 * u, 0]), anchor: "start"
+    }));
+    const depthLabel = polar(labelRadius, 7 * Math.PI / 10);
+    out.push(dimension(ctx, "/bore/keyDepth", {
+      u, a: [radius, 0], b: [bottom, 0], value: bore.keyDepth,
+      leader: [[(radius + bottom) / 2, 0], depthLabel], label: add(depthLabel, [0.3 * u, 0]), anchor: "start"
+    }));
+  }
+  return out;
 }
 
 function spokeDimensions(ctx, plan, web, u, outer) {
@@ -231,7 +291,9 @@ export function renderSection(model, ctx) {
     if (z.lowerFlange !== null) rects.flanges.lower.push(box(rimInner, z.lowerFlange, flangeRadius.lower, z.rimLower));
     if (z.upperFlange !== null) rects.flanges.upper.push(box(rimInner, z.rimUpper, flangeRadius.upper, z.upperFlange));
     if (rimInner > r.hub) rects.web.push(box(r.hub, z.webLower, rimInner, z.webUpper));
-    if (r.hub > r.bore) rects.hub.push(box(r.bore, z.lowerHub, r.hub, z.upperHub));
+    // the flat, the keyway and a polygon side face +X, so the bore edge differs between the halves
+    const boreEdge = Math.max(side > 0 ? derived.boreExtentX.positive : derived.boreExtentX.negative, 0);
+    if (r.hub > boreEdge) rects.hub.push(box(boreEdge, z.lowerHub, r.hub, z.upperHub));
   }
 
   const out = [];
@@ -248,7 +310,7 @@ export function renderSection(model, ctx) {
   out.push(`<path class="centre-line" d="M${P([0, bottom - u])}L${P([0, top + u])}"/>`);
   out.push(`<path class="centre-line" d="M${P([-outer - 0.6 * u, 0])}L${P([outer + 0.6 * u, 0])}"/>`);
 
-  const { rim, flanges, web, hub } = normalized;
+  const { rim, flanges, web, hub, bore } = normalized;
 
   // right column: lower flange, toothed width, upper flange as a chain
   const column = outer + 1.5 * u;
@@ -277,13 +339,18 @@ export function renderSection(model, ctx) {
     }));
   }
 
-  // bore and hub diameters above the part, values centred over their lines
-  for (const [path, radius, row, value] of [["/hub/boreDiameter", r.bore, 1.4, hub.boreDiameter], ["/hub/outerDiameter", r.hub, 2.9, hub.outerDiameter]]) {
-    const level = top + row * u;
+  // hub and bore sizes across the part, above it, values centred over their lines;
+  // they belong to different groups and never show together. The section shows
+  // the bore sizes that lie in its plane: d of a round bore and s of a flat.
+  const across = [["/hub/outerDiameter", -r.hub, r.hub, hub.outerDiameter]];
+  if (bore.shape === "round") across.push(["/bore/diameter", -r.bore, r.bore, bore.diameter]);
+  if (bore.shape === "dFlat") across.push(["/bore/flatDistance", -r.bore, bore.flatDistance - r.bore, bore.flatDistance]);
+  const acrossLevel = top + 1.4 * u;
+  for (const [path, x0, x1, value] of across) {
     out.push(dimension(ctx, path, {
-      u, a: [-radius, level], b: [radius, level], value,
-      ext: [[[-radius, z.upperHub + 0.3 * u], [-radius, level + 0.4 * u]], [[radius, z.upperHub + 0.3 * u], [radius, level + 0.4 * u]]],
-      label: [0, level + 0.65 * u], anchor: "middle"
+      u, a: [x0, acrossLevel], b: [x1, acrossLevel], value,
+      ext: [[[x0, z.upperHub + 0.3 * u], [x0, acrossLevel + 0.4 * u]], [[x1, z.upperHub + 0.3 * u], [x1, acrossLevel + 0.4 * u]]],
+      label: [(x0 + x1) / 2, acrossLevel + 0.65 * u], anchor: "middle"
     }));
   }
 
@@ -358,7 +425,7 @@ export function chordSummary(model) {
   const r = model.anchors.radii;
   const flange = Math.max(model.derived.lowerFlangeOuterRadius ?? 0, model.derived.upperFlangeOuterRadius ?? 0);
   return [
-    ["отверстие", r.bore],
+    model.normalized.bore.shape === "polygon" ? null : ["отверстие", r.bore],
     ["втулка", r.hub],
     flange > 0 ? ["фланец", flange] : null
   ].filter(Boolean).filter(([, radius]) => radius > 0)

@@ -7,10 +7,10 @@ import { FIELDS, GROUPS, fieldSchema, fieldsOf, groupOfPath } from "../src/ui/fi
 import { formatNumber, inputText, plural, splitSymbol } from "../src/ui/format.js";
 import { diagnosticKind, diagnosticText } from "../src/ui/messages.js";
 import { PRESETS } from "../src/ui/presets.js";
-import { createState, getValue, loadDescription, parseNumber, setFlange, setValue, setWebType } from "../src/ui/state.js";
+import { createState, getValue, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setValue, setWebType } from "../src/ui/state.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
-const schema = await readJson("../schemas/pulley-v1.schema.json");
+const schema = await readJson("../schemas/pulley-v2.schema.json");
 const exampleNames = async (kind) => (await readdir(new URL(`../examples/${kind}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();
 const numeric = (field) => !field.kind;
 
@@ -46,13 +46,14 @@ test("every field is described completely and its limits come from the schema", 
     for (const key of ["minimum", "maximum", "default"]) assert.ok(Number.isFinite(limits[key]), `${field.path} ${key}`);
     assert.ok(limits.minimum <= limits.default && limits.default <= limits.maximum, field.path);
   }
-  // every number the contract lets a person choose has a field (this example has all parts)
+  // every number the contract lets a person choose has a field (together the examples have all parts)
   const leaves = [];
   const walk = (value, path) => {
     if (typeof value === "number") leaves.push(path);
     else if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) walk(child, `${path}/${key}`);
   };
-  walk(await readJson("../examples/valid/spokes-flanged.json"), "");
+  for (const name of await exampleNames("valid")) walk(await readJson(`../examples/valid/${name}`), "");
+  for (const path of ["/bore/sides", "/bore/flatDistance", "/bore/keyWidth", "/bore/keyDepth"]) assert.ok(leaves.includes(path), `no example has ${path}`);
   for (const leaf of leaves.filter((path) => path !== "/schemaVersion")) assert.ok(paths.has(leaf), `no field for ${leaf}`);
 });
 
@@ -99,6 +100,26 @@ test("the focused dimension is marked and the drawings are self-contained", asyn
   assert.ok(!/NaN|undefined/.test(plan + section), "no broken numbers in the SVG");
 });
 
+test("the bore group shows the hub as a detail with the sizes of its shape", async () => {
+  const expected = { "hex-bore.json": ["/bore/diameter", "/bore/sides"], "motor-d-flat.json": ["/bore/diameter", "/bore/flatDistance"], "keyed-spokes.json": ["/bore/diameter", "/bore/keyDepth", "/bore/keyWidth"] };
+  for (const [name, paths] of Object.entries(expected)) {
+    const model = modelOf(await readJson(`../examples/valid/${name}`));
+    const plan = renderPlan(model, contextFor(model, "bore"));
+    assert.deepEqual(dimensionPaths(plan).sort(), paths, name);
+    assert.match(plan, /<clipPath id="plan-detail">/, name);
+    assert.ok(!/NaN|undefined/.test(plan), name);
+    assert.ok(!renderPlan(model, contextFor(model, "hub")).includes("clipPath"), `${name}: only the bore group is a detail`);
+  }
+  // the flat is measured on the section too, where the hub halves differ
+  const flat = modelOf(await readJson("../examples/valid/motor-d-flat.json"));
+  assert.deepEqual(dimensionPaths(renderSection(flat, contextFor(flat, "bore"))), ["/bore/flatDistance"]);
+  // out-of-rule sizes still draw
+  for (const name of ["bore-flat.json", "bore-key.json"]) {
+    const model = modelOf(await readJson(`../examples/invalid/${name}`));
+    assert.ok(!/NaN|undefined/.test(renderPlan(model, contextFor(model, "bore")) + renderSection(model, contextFor(model, "bore"))), name);
+  }
+});
+
 test("a schematic spoke plan still draws, without fillet radii", async () => {
   const model = modelOf(await readJson("../examples/invalid/spoke-fillet.json"));
   assert.equal(model.ok, false);
@@ -115,6 +136,8 @@ test("chord summary counts segments for the characteristic circles", async () =>
   assert.deepEqual(rows.map(({ name }) => name), ["отверстие", "втулка", "фланец"]);
   assert.ok(rows.every(({ segments }) => Number.isInteger(segments) && segments >= 12));
   assert.ok(rows[0].segments < rows[2].segments, "a larger circle needs more segments");
+  const hex = modelOf(await readJson("../examples/valid/hex-bore.json"));
+  assert.ok(!chordSummary(hex).some(({ name }) => name === "отверстие"), "a polygonal bore has no arcs");
 });
 
 test("defaults validate and the form state keeps hidden values", () => {
@@ -133,6 +156,31 @@ test("defaults validate and the form state keeps hidden values", () => {
   assert.equal(bare.description.flanges.upper, null);
   assert.equal(setFlange(bare, "upper", true).description.flanges.upper.axialThickness, 2.5);
   assert.equal(getValue(flanged.description, "/flanges/upper/axialThickness"), 2.5);
+});
+
+test("switching the bore shape keeps the diameter and the sizes of other shapes", async () => {
+  const state = createState(schema);
+  const keyed = setValue(setValue(setBoreShape(state, "keyed"), "/bore/keyWidth", 3), "/bore/diameter", 10);
+  assert.deepEqual(keyed.description.bore, { shape: "keyed", diameter: 10, keyWidth: 3, keyDepth: 1 });
+  const hex = setBoreShape(keyed, "polygon");
+  assert.deepEqual(hex.description.bore, { shape: "polygon", diameter: 10, sides: 6 });
+  assert.equal(validateDescription({ ...hex.description, hub: { ...hex.description.hub, outerDiameter: 16 } }).ok, true);
+  assert.equal(setBoreShape(hex, "keyed").description.bore.keyWidth, 3);
+  assert.deepEqual(setBoreShape(hex, "round").description.bore, { shape: "round", diameter: 10 });
+
+  const loaded = loadDescription(state, await readJson("../examples/valid/motor-d-flat.json"));
+  assert.equal(setBoreShape(setBoreShape(loaded, "round"), "dFlat").description.bore.flatDistance, 4.7);
+});
+
+test("a form state saved with a version 1 description is upgraded", () => {
+  const { description } = createState(schema);
+  const { bore, ...rest } = description;
+  const saved = { description: { ...rest, schemaVersion: 1, hub: { boreDiameter: 6, ...description.hub } }, remembered: { spokes: { count: 4, width: 2, filletRadius: 1 }, flanges: createState(schema).remembered.flanges } };
+  const restored = restoreState(schema, saved);
+  assert.deepEqual(restored.description, { ...description, bore: { shape: "round", diameter: 6 } });
+  assert.equal(restored.remembered.spokes.count, 4);
+  assert.equal(restored.remembered.bore.sides, 6);
+  assert.equal(restoreState(schema, { description }), null);
 });
 
 test("loading a description remembers its spokes and flanges", async () => {
@@ -180,6 +228,7 @@ test("diagnostic paths map to groups", () => {
   assert.equal(groupOfPath("/web/type"), "web");
   assert.equal(groupOfPath("/rim/profile"), "rim");
   assert.equal(groupOfPath("/hub/outerDiameter"), "hub");
+  assert.equal(groupOfPath("/bore/keyDepth"), "bore");
 });
 
 test("every diagnostic of the examples reads as a sentence", async () => {

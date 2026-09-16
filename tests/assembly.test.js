@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { generatePulley, validateDescription } from "../src/core/generate.js";
-import { buildGt2Contour, buildMarkedCircle, circleSegmentCount } from "../src/core/contours.js";
+import { boreExtents, buildBoreContour, buildGt2Contour, buildMarkedCircle, circleSegmentCount } from "../src/core/contours.js";
 import { triangulateSimplePolygon } from "../src/core/mesh-builder.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
@@ -24,6 +24,17 @@ const WEB_VARIANTS = {
   spokesFull: { ...SPOKES, axialThickness: 9, axialOffset: 0 }
 };
 const HUB_VARIANTS = [[0, 0], [2, 0], [0, 3], [2, 3]];
+// sizes for a 12 mm hub; each shape reaches close to the 1 mm wall limit somewhere
+const BORE_VARIANTS = {
+  triangle: { shape: "polygon", diameter: 8, sides: 3 },
+  square: { shape: "polygon", diameter: 8.5, sides: 4 },
+  hexagon: { shape: "polygon", diameter: 8.7, sides: 6 },
+  dodecagon: { shape: "polygon", diameter: 9.3, sides: 12 },
+  flat: { shape: "dFlat", diameter: 5, flatDistance: 4.5 },
+  deepFlat: { shape: "dFlat", diameter: 9, flatDistance: 4.6 },
+  keyed: { shape: "keyed", diameter: 6, keyWidth: 2, keyDepth: 1 },
+  wideKey: { shape: "keyed", diameter: 6, keyWidth: 5.5, keyDepth: 0.5 }
+};
 
 test("every flange, web and hub-extension combination builds one closed solid", async () => {
   const base = await readJson("../examples/valid/spokes-flanged.json");
@@ -48,12 +59,89 @@ test("every flange, web and hub-extension combination builds one closed solid", 
   }
 });
 
+test("every bore shape builds one closed solid with the volume of its contour", async () => {
+  const base = await readJson("../examples/valid/spokes-flanged.json");
+  for (const [boreName, bore] of Object.entries(BORE_VARIANTS)) {
+    for (const webName of ["solidFull", "solidThin", "spokesCentered"]) {
+      for (const maxChordError of [0.01, 0.25]) {
+        const input = { ...structuredClone(base), web: WEB_VARIANTS[webName], bore };
+        input.generation.maxChordError = maxChordError;
+        const label = `${boreName}/${webName}/ε ${maxChordError}`;
+        const result = generatePulley(input);
+        assert.equal(result.ok, true, `${label}: ${JSON.stringify(result.diagnostics)}`);
+        assert.deepEqual(result.verification.errors, [], label);
+        assert.equal(result.verification.connectedComponents, 1, label);
+        assertNoDuplicateVertices(result.mesh, label);
+        if (webName !== "spokesCentered") {
+          const expected = expectedSolidWebVolume(input, result.derived);
+          assert.ok(Math.abs(result.verification.signedVolume - expected) < 1e-9 * expected, `${label}: volume`);
+        }
+      }
+    }
+  }
+});
+
+test("bore contours are loops around the axis with their exact sizes", () => {
+  for (const [name, bore] of Object.entries({ round: { shape: "round", diameter: 5 }, ...BORE_VARIANTS })) {
+    for (const maxChordError of [0.01, 0.25]) {
+      const label = `${name}/ε ${maxChordError}`;
+      const { points } = buildBoreContour(bore, maxChordError);
+      assert.equal(points[0][0], 0, `${label}: starts on the +Y ray`);
+      assert.ok(points[0][1] > 0, label);
+      const angles = points.map(([x, y]) => (Math.atan2(x, y) + 2 * Math.PI) % (2 * Math.PI));
+      for (let index = 1; index < angles.length; index += 1) assert.ok(angles[index] > angles[index - 1], `${label}: clockwise at ${index}`);
+
+      // extents from the contour itself: the farthest vertex and where the ±X rays cross it
+      const radius = bore.diameter / 2;
+      const extents = boreExtents(bore);
+      const farthest = Math.max(...points.map((point) => Math.hypot(...point)));
+      assert.ok(Math.abs(farthest - extents.outerRadius) < 1e-12, `${label}: outer radius ${farthest} vs ${extents.outerRadius}`);
+      assert.ok(Math.abs(rayCrossing(points, 1) - extents.positiveX) <= maxChordError, `${label}: +X`);
+      assert.ok(Math.abs(rayCrossing(points, -1) - extents.negativeX) <= maxChordError, `${label}: −X`);
+
+      // area within the chord tolerance of the exact shape
+      const perimeter = points.reduce((sum, point, index) => sum + Math.hypot(...point.map((value, axis) => value - points[(index + 1) % points.length][axis])), 0);
+      assert.ok(Math.abs(polygonArea(points) - exactBoreArea(bore)) <= perimeter * maxChordError, `${label}: area`);
+      if (bore.shape === "polygon") assert.ok(Math.abs(polygonArea(points) - exactBoreArea(bore)) < 1e-12 * radius ** 2, `${label}: polygon area is exact`);
+    }
+  }
+});
+
+test("shaped bores match the analytic shape at sample points", async () => {
+  const base = await readJson("../examples/valid/spokes-flanged.json");
+  base.generation.maxChordError = 0.1;
+  for (const [name, bore] of Object.entries(BORE_VARIANTS)) {
+    const input = { ...structuredClone(base), bore };
+    const result = generatePulley(input);
+    assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
+    const triangles = meshTriangles(result.mesh);
+    const margin = 1.5 * input.generation.maxChordError + 1e-4;
+    const z = result.derived.hubUpperZ - 0.7; // above the web, where only the hub is material
+    const hubRadius = result.derived.hubRadius;
+    let checked = 0;
+    const steps = 30;
+    for (let i = 0; i <= steps; i += 1) {
+      for (let j = 0; j <= steps; j += 1) {
+        const x = -hubRadius + 2 * hubRadius * (i + 0.2718) / (steps + 1);
+        const y = -hubRadius + 2 * hubRadius * (j + 0.3141) / (steps + 1);
+        if (Math.hypot(x, y) > hubRadius - margin) continue;
+        const inside = insideBore(bore, x, y, margin);
+        if (inside === null) continue;
+        checked += 1;
+        assert.equal(insideMesh(triangles, [x, y, z]), !inside, `${name}: point ${x.toFixed(3)}, ${y.toFixed(3)}`);
+      }
+    }
+    assert.ok(checked > 400, `${name}: only ${checked} sample points away from boundaries`);
+  }
+});
+
 test("spokes, fillets and windows match the analytic shape at sample points", async () => {
   const base = await readJson("../examples/valid/spokes-flanged.json");
   const wide = structuredClone(base);
   // wide spokes on a small hub: the fillet ends lie below the hub's widest chord
   Object.assign(wide.web, { count: 3, width: 7.5, filletRadius: 0.8, axialThickness: 5, axialOffset: -2 });
-  Object.assign(wide.hub, { boreDiameter: 5, outerDiameter: 11 });
+  wide.bore.diameter = 5;
+  wide.hub.outerDiameter = 11;
   const narrow = structuredClone(base);
   // narrow spokes on a large rim with coarse arcs: the rim guard vertex matters
   Object.assign(narrow.rim, { toothCount: 120, radialThickness: 1.5 });
@@ -170,6 +258,62 @@ function assertExpectedBounds(input, result, label) {
   if (input.flanges.lower || input.flanges.upper) assert.equal(result.mesh.bounds.max[1], derived.bounds.max[1], `${label}: max y`);
 }
 
+/** Where the ray from the axis along direction·X leaves the loop, as a distance. */
+function rayCrossing(points, direction) {
+  for (let index = 0; index < points.length; index += 1) {
+    const [x0, y0] = points[index];
+    const [x1, y1] = points[(index + 1) % points.length];
+    if ((y0 > 0) === (y1 > 0) && y0 !== 0) continue;
+    const x = y0 === y1 ? Math.max(x0 * direction, x1 * direction) * direction : x0 + (x1 - x0) * (0 - y0) / (y1 - y0);
+    if (x * direction > 0) return x * direction;
+  }
+  return NaN;
+}
+
+function exactBoreArea(bore) {
+  const radius = bore.diameter / 2;
+  const circle = Math.PI * radius ** 2;
+  if (bore.shape === "polygon") return bore.sides * radius ** 2 * Math.sin(2 * Math.PI / bore.sides) / 2;
+  // a segment of height h cut off a circle: r²acos((r − h)/r) − (r − h)√(2rh − h²)
+  const segment = (height) => radius ** 2 * Math.acos((radius - height) / radius) - (radius - height) * Math.sqrt(2 * radius * height - height ** 2);
+  if (bore.shape === "dFlat") return circle - segment(bore.diameter - bore.flatDistance);
+  if (bore.shape === "keyed") {
+    const half = bore.keyWidth / 2;
+    const edge = Math.sqrt(radius ** 2 - half ** 2);
+    return circle - segment(radius - edge) + 2 * half * (radius + bore.keyDepth - edge);
+  }
+  return circle;
+}
+
+/** Point inside the bore from its analytic description, or null within margin of its outline. */
+function insideBore(bore, x, y, margin) {
+  const radius = bore.diameter / 2;
+  const r = Math.hypot(x, y);
+  const near = (value, edge) => Math.abs(value - edge) < margin;
+  if (bore.shape === "polygon") {
+    const distances = Array.from({ length: bore.sides }, (_, k) => {
+      const angle = Math.PI / 2 + 2 * Math.PI * k / bore.sides; // side middles, clockwise from +Y
+      return x * Math.sin(angle) + y * Math.cos(angle);
+    });
+    const apothem = radius * Math.cos(Math.PI / bore.sides);
+    if (distances.some((distance) => near(distance, apothem))) return null;
+    return distances.every((distance) => distance < apothem);
+  }
+  if (bore.shape === "dFlat") {
+    const flat = bore.flatDistance - radius;
+    if (near(r, radius) || near(x, flat)) return null;
+    return r < radius && x < flat;
+  }
+  if (bore.shape === "keyed") {
+    const half = bore.keyWidth / 2;
+    const bottom = radius + bore.keyDepth;
+    if (near(r, radius) || (x > 0 && (near(Math.abs(y), half) || near(x, bottom)))) return null;
+    return r < radius || (Math.abs(y) < half && x > 0 && x < bottom);
+  }
+  if (near(r, radius)) return null;
+  return r < radius;
+}
+
 /** Volume of the stacked prisms, from shoelace areas of the same discretised contours. */
 function expectedSolidWebVolume(input, derived) {
   const error = input.generation.maxChordError;
@@ -177,9 +321,10 @@ function expectedSolidWebVolume(input, derived) {
   const halfPitch = Array.from({ length: 2 * N }, (_, index) => index * Math.PI / N);
   const circleArea = (radius, marks = []) => polygonArea(buildMarkedCircle(radius, circleSegmentCount(radius, error), marks).points);
   const rimInner = circleArea(derived.rimInnerRadius, halfPitch);
-  const hub = circleArea(derived.hubRadius);
+  const hub = circleArea(derived.hubRadius, buildBoreContour(input.bore, error).corners);
   let volume = (polygonArea(buildGt2Contour(N, derived.outsideRadius)) - rimInner) * input.rim.toothedWidth;
-  volume += (hub - circleArea(derived.boreRadius)) * (derived.hubUpperZ - derived.hubLowerZ);
+  const bore = polygonArea(buildBoreContour(input.bore, error).points);
+  volume += (hub - bore) * (derived.hubUpperZ - derived.hubLowerZ);
   volume += (rimInner - hub) * (derived.webUpperZ - derived.webLowerZ);
   for (const flange of [input.flanges.lower, input.flanges.upper]) {
     if (flange) volume += (circleArea(derived.outsideRadius + flange.radialExtension, halfPitch) - rimInner) * flange.axialThickness;

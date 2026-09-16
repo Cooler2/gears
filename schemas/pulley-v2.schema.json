@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gears.local/schemas/pulley-v1.schema.json",
-  "title": "Gears timing pulley description, version 1",
+  "$id": "https://gears.local/schemas/pulley-v2.schema.json",
+  "title": "Gears timing pulley description, version 2",
   "description": "Static structure and scalar limits for the first GT 2 mm pulley contract. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
@@ -13,12 +13,13 @@
     "flanges",
     "web",
     "hub",
+    "bore",
     "generation"
   ],
   "properties": {
     "schemaVersion": {
-      "const": 1,
-      "description": "Major version of the persisted input format."
+      "const": 2,
+      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter; readers upgrade it to bore.shape round."
     },
     "kind": {
       "const": "timingPulley",
@@ -42,6 +43,14 @@
     },
     "hub": {
       "$ref": "#/$defs/hub"
+    },
+    "bore": {
+      "oneOf": [
+        { "$ref": "#/$defs/roundBore" },
+        { "$ref": "#/$defs/polygonBore" },
+        { "$ref": "#/$defs/dFlatBore" },
+        { "$ref": "#/$defs/keyedBore" }
+      ]
     },
     "generation": {
       "$ref": "#/$defs/generation"
@@ -199,15 +208,8 @@
     "hub": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["boreDiameter", "outerDiameter", "lowerExtension", "upperExtension"],
+      "required": ["outerDiameter", "lowerExtension", "upperExtension"],
       "properties": {
-        "boreDiameter": {
-          "type": "number",
-          "minimum": 0.5,
-          "maximum": 50,
-          "default": 5,
-          "description": "Diameter of the centered cylindrical through bore."
-        },
         "outerDiameter": {
           "type": "number",
           "minimum": 2,
@@ -229,6 +231,97 @@
           "default": 0,
           "description": "Hub projection above the upper toothed-rim face at z=+toothedWidth/2."
         }
+      }
+    },
+    "borePlacement": {
+      "properties": {
+        "diameter": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 50,
+          "default": 5,
+          "description": "Bore circle diameter; for a polygon, the diameter of its circumscribed circle (across corners)."
+        },
+        "sides": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 12,
+          "default": 6,
+          "description": "Number of sides of a regular polygonal bore; one side faces +X."
+        },
+        "flatDistance": {
+          "type": "number",
+          "minimum": 0.3,
+          "maximum": 50,
+          "default": 4.5,
+          "description": "Distance from the flat, which faces +X, to the opposite side of the bore circle."
+        },
+        "keyWidth": {
+          "type": "number",
+          "minimum": 0.3,
+          "maximum": 20,
+          "default": 2,
+          "description": "Width of the keyway, which runs along the +X ray."
+        },
+        "keyDepth": {
+          "type": "number",
+          "minimum": 0.2,
+          "maximum": 10,
+          "default": 1,
+          "description": "Keyway depth beyond the bore circle, measured along the +X ray."
+        }
+      }
+    },
+    "roundBore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "diameter"],
+      "properties": {
+        "shape": {
+          "const": "round",
+          "description": "A cylindrical through bore."
+        },
+        "diameter": { "$ref": "#/$defs/borePlacement/properties/diameter" }
+      }
+    },
+    "polygonBore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "diameter", "sides"],
+      "properties": {
+        "shape": {
+          "const": "polygon",
+          "description": "A regular polygonal through bore."
+        },
+        "diameter": { "$ref": "#/$defs/borePlacement/properties/diameter" },
+        "sides": { "$ref": "#/$defs/borePlacement/properties/sides" }
+      }
+    },
+    "dFlatBore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "diameter", "flatDistance"],
+      "properties": {
+        "shape": {
+          "const": "dFlat",
+          "description": "A round through bore truncated by one flat (D shape)."
+        },
+        "diameter": { "$ref": "#/$defs/borePlacement/properties/diameter" },
+        "flatDistance": { "$ref": "#/$defs/borePlacement/properties/flatDistance" }
+      }
+    },
+    "keyedBore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "diameter", "keyWidth", "keyDepth"],
+      "properties": {
+        "shape": {
+          "const": "keyed",
+          "description": "A round through bore with one rectangular keyway."
+        },
+        "diameter": { "$ref": "#/$defs/borePlacement/properties/diameter" },
+        "keyWidth": { "$ref": "#/$defs/borePlacement/properties/keyWidth" },
+        "keyDepth": { "$ref": "#/$defs/borePlacement/properties/keyDepth" }
       }
     },
     "generation": {
