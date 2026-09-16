@@ -435,6 +435,7 @@ button {
 }
 
 .preset:hover { border-color: var(--accent); }
+.preset-current { border-style: dashed; }
 .preset-thumb svg { width: 100%; height: auto; display: block; }
 .preset-title { font-weight: 600; }
 .preset-text { font-size: 13px; color: var(--muted); }
@@ -728,3 +729,15 @@ figcaption {
 @media (min-width: 1500px) and (min-height: 860px) {
   .form-panel, .preview { min-height: 0; overflow-y: auto; } /* three columns, each scrolls by itself */
 }
+
+/* the variants page: one column over the whole width, no drawings and no preview */
+body[data-page="presets"] .drawings,
+body[data-page="presets"] .preview { display: none; }
+body[data-page="presets"] .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "side"; }
+body[data-page="presets"] .side { display: flex; grid-area: side; }
+body[data-page="presets"] .form-panel { overflow: visible; }
+body[data-page="presets"] .presets { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+body[data-page="presets"] .preset { padding: 14px; gap: 6px; }
+body[data-page="presets"] .preset-thumb svg { max-height: 260px; }
+body[data-page="presets"] .preset-title { font-size: 16px; }
+body[data-page="presets"] .preset-text { font-size: 14px; }

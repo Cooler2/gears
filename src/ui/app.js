@@ -47,7 +47,8 @@ try {
 $("#boot").hidden = true;
 
 let state = restoreState() ?? createState(schema);
-const view = { group: "rim", focus: null, ...readHash() };
+// the page opens on the variants; a bookmarked group or field opens the editor directly
+const view = { group: "presets", focus: null, ...readHash() };
 let validation = null; // core answer for the current description
 let result = null; // the same with build failures of the current description added
 let currentKey = null;
@@ -141,6 +142,8 @@ function writeHash() {
 // -------------------------------------------------------------- rendering
 
 function renderAll() {
+  // the variants take the whole page: drawings and the preview belong to the editor
+  document.body.dataset.page = view.group === "presets" ? "presets" : "editor";
   renderNav();
   renderForm();
   renderMessages();
@@ -255,17 +258,23 @@ function boreRows({ normalized: { bore }, derived }) {
 }
 
 function presetCards() {
-  return `<p class="lead">Готовые варианты из каталога примеров. Выбранный вариант заменяет текущие параметры; дальше их можно менять в любом разделе.</p>
-    <div class="presets">${presets.map((preset, index) => {
-      const checked = validateDescription(preset.description);
-      const thumbnail = checked.normalized
-        ? renderPlan({ ...checked, plan: buildPlanView(checked.normalized, checked.derived) }, { visible: new Set(), focus: null, errors: new Set(), advice: new Set(), group: null, description: checked.normalized })
-        : "";
-      return `<button type="button" class="preset" data-preset="${index}">
-        <span class="preset-thumb" aria-hidden="true">${thumbnail}</span>
+  const current = `<button type="button" class="preset preset-current" data-continue>
+    <span class="preset-thumb" aria-hidden="true">${thumbnailOf(state.description)}</span>
+    <span class="preset-title">Текущие параметры</span>
+    <span class="preset-text">Продолжить настройку с того места, где вы остановились.</span></button>`;
+  return `<p class="lead">Начните с готового варианта: он заменит текущие параметры, дальше их можно менять в любом разделе. Или продолжите с текущими.</p>
+    <div class="presets">${current}${presets.map((preset, index) => `<button type="button" class="preset" data-preset="${index}">
+        <span class="preset-thumb" aria-hidden="true">${thumbnailOf(preset.description)}</span>
         <span class="preset-title">${escapeHtml(preset.title)}</span>
-        <span class="preset-text">${escapeHtml(preset.text)}</span></button>`;
-    }).join("")}</div>`;
+        <span class="preset-text">${escapeHtml(preset.text)}</span></button>`).join("")}</div>`;
+}
+
+/** Plan view without sizes, or nothing for a description that cannot be drawn. */
+function thumbnailOf(description) {
+  const checked = validateDescription(description);
+  if (!checked.normalized) return "";
+  const ctx = { visible: new Set(), focus: null, errors: new Set(), advice: new Set(), group: null, description: checked.normalized };
+  return renderPlan({ ...checked, plan: buildPlanView(checked.normalized, checked.derived) }, ctx);
 }
 
 /**
@@ -531,6 +540,10 @@ el.form.addEventListener("keydown", (event) => {
 });
 
 el.form.addEventListener("click", (event) => {
+  if (event.target.closest("[data-continue]")) {
+    openGroup("rim");
+    return;
+  }
   const preset = event.target.closest("[data-preset]");
   if (!preset) return;
   update(loadDescription(state, presets[Number(preset.dataset.preset)].description));
