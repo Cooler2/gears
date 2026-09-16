@@ -92,6 +92,7 @@ function update(next, { rebuildForm = false } = {}) {
   saveState();
   evaluate();
   if (rebuildForm) renderForm();
+  else renderComputed();
   renderNav();
   renderMessages();
   renderDrawings();
@@ -198,7 +199,14 @@ function renderForm() {
     if (field.kind === "toggle") return toggleMarkup(field, description);
     if (field.kind === "choice") return choiceMarkup(field, description);
     return numberMarkup(field, description);
-  }).join("") + computedMarkup();
+  }).join("") + '<div id="computed"></div>';
+  renderComputed();
+}
+
+/** The computed sizes follow every change; the fields above them are not rebuilt while typing. */
+function renderComputed() {
+  const slot = el.form.querySelector("#computed");
+  if (slot) slot.innerHTML = computedMarkup();
 }
 
 function fieldId(path) {
@@ -246,6 +254,7 @@ function choiceMarkup(field, description) {
 function computedMarkup() {
   if (!model) return "";
   const { derived, anchors } = model;
+  const previous = result.normalized ? "" : ' <span class="tag">для прежних параметров</span>';
   const rows = {
     rim: {
       idlerPulley: [["Внутренний диаметр обода", 2 * derived.rimInnerRadius]],
@@ -260,11 +269,11 @@ function computedMarkup() {
     generation: []
   }[view.group].filter(([, value]) => typeof value === "number");
   if (view.group === "generation") {
-    return `<div class="computed"><h3>Отрезков на окружность</h3><dl>${chordSummary(model).map(({ name, diameter, segments }) =>
+    return `<div class="computed"><h3>Отрезков на окружность${previous}</h3><dl>${chordSummary(model).map(({ name, diameter, segments }) =>
       `<div><dt>${escapeHtml(name)} ⌀${formatNumber(diameter)} мм</dt><dd>${segments}</dd></div>`).join("")}</dl></div>`;
   }
   if (!rows.length) return "";
-  return `<div class="computed"><h3>Вычисленные размеры</h3><dl>${rows.map(([name, value]) =>
+  return `<div class="computed"><h3>Вычисленные размеры${previous}</h3><dl>${rows.map(([name, value]) =>
     `<div><dt>${escapeHtml(name)}</dt><dd>${formatNumber(value)} мм</dd></div>`).join("")}</dl></div>`;
 }
 
