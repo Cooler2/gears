@@ -24,6 +24,7 @@ const SECTION_FIRST = new Set(["flanges", "hub"]);
 const MAX_FILE_BYTES = 1 << 20; // a description is well under a kilobyte
 const BUILD_TIMEOUT_MS = 20000;
 const CONTEXT_VIEW_SCALE = 0.6; // labels of a view with no sizes of its own, relative to the main one
+const PRESET_KIND_ORDER = ["spurGear", "timingPulley", "idlerPulley"]; // gears open the variants page
 const PREVIEW_TAGS = { fresh: "по текущим параметрам", building: "строится…", invalid: "устарела", failed: "не построена", crashed: "сбой" };
 const $ = (selector) => document.querySelector(selector);
 const el = {
@@ -301,11 +302,17 @@ function boreRows({ normalized: { bore }, derived }) {
 
 /** The variants page: start a new part of any kind; the sections above lead back to the current one. */
 function presetCards() {
-  const card = (attributes, className, description, title, text) => `<button type="button" class="preset ${className}" ${attributes}>
+  // a card shows the picture and the title, its description pops up on hover and focus
+  let cards = 0;
+  const card = (attributes, className, description, title, text) => {
+    const id = `preset-tip-${cards++}`;
+    return `<button type="button" class="preset ${className}" ${attributes} aria-describedby="${id}">
     <span class="preset-thumb" aria-hidden="true">${thumbnailOf(description)}</span>
     <span class="preset-title">${escapeHtml(title)}</span>
-    <span class="preset-text">${escapeHtml(text)}</span></button>`;
-  const sections = KINDS.map((kind) => `<h3 class="preset-kind">${escapeHtml(kind.title)}</h3>
+    <span class="tip preset-text" id="${id}" role="tooltip">${escapeHtml(text)}</span></button>`;
+  };
+  const kinds = PRESET_KIND_ORDER.map((id) => KINDS.find((kind) => kind.id === id));
+  const sections = kinds.map((kind) => `<h3 class="preset-kind">${escapeHtml(kind.title)}</h3>
     <p class="lead">${escapeHtml(kind.text)}</p>
     <div class="presets">${card(`data-new="${kind.id}"`, "preset-new", defaultDescription(schema, kind.id), "Новый", "Все размеры по умолчанию.")}${
       presets.map((preset, index) => preset.description.kind === kind.id
