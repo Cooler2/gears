@@ -1,4 +1,4 @@
-// Part kinds, form groups and fields of the pulley contract v3.
+// Part kinds, form groups and fields of the pulley contract v4.
 //
 // Everything about a field that the contract already defines (limits, defaults,
 // integer or not) is read from the JSON Schema through `schema`; this file adds
@@ -49,6 +49,12 @@ export function groupTitle(group, description) {
 const isSpokes = (description) => description.web?.type === "spokes";
 const hasBore = (...shapes) => (description) => shapes.includes(description.bore?.shape);
 const hasFlange = (side) => (description) => Boolean(description.flanges?.[side]);
+
+/** The faces of the part in words: flange far faces, or rim ends where there is no flange. */
+function faceWords(description, side) {
+  const end = `${side === "lower" ? "нижнего" : "верхнего"} торца ${rimWords(description).partOf}`;
+  return isGear(description) ? end : `${side === "lower" ? "нижнего" : "верхнего"} фланца, а без него — ${end}`;
+}
 
 export const FIELDS = [
   {
@@ -136,15 +142,22 @@ export const FIELDS = [
     hint: "Сплошной диск или прямые спицы со скруглениями."
   },
   {
-    path: "/web/axialThickness", group: "web", schema: ["webPlacement", "axialThickness"],
-    label: (description) => isSpokes(description) ? "Толщина спиц" : "Толщина полотна", symbol: "T_w", unit: "мм",
-    hint: (description) => `Вдоль оси. Равная ширине ${rimWords(description).partOf} толщина даёт сплошное тело.`
+    path: "/web/thinning", group: "web", schema: ["webPlacement", "thinning"],
+    label: (description) => isSpokes(description) ? "Утонение спиц" : "Утонение полотна", symbol: "t_w", unit: "мм",
+    hint: (description) => isGear(description)
+      ? "На сколько полотно тоньше венца. Ноль — сплошное тело во всю ширину."
+      : "На сколько полотно тоньше детали вместе с фланцами. Ноль — полотно во всю высоту, заподлицо с фланцами."
+  },
+  {
+    path: "/web/alignment", group: "web", kind: "choice",
+    label: (description) => isSpokes(description) ? "Спицы прижаты" : "Полотно прижато",
+    options: [{ value: "lower", label: "К низу" }, { value: "center", label: "По центру" }, { value: "upper", label: "К верху" }],
+    hint: "К низу — плоское основание для печати: полотно лежит в одной плоскости с нижним фланцем или торцом и втулкой."
   },
   {
     path: "/web/axialOffset", group: "web", schema: ["webPlacement", "axialOffset"],
-    label: (description) => isSpokes(description) ? "Смещение спиц" : "Смещение полотна", symbol: "Δz", unit: "мм",
-    hint: (description) => `Средняя плоскость полотна относительно середины ${rimWords(description).partOf}, плюс — вверх. ` +
-      `Полотно не должно выходить за торцы ${rimWords(description).bodyOf}.`
+    label: (description) => isSpokes(description) ? "Сдвиг спиц" : "Сдвиг полотна", symbol: "Δz", unit: "мм",
+    hint: "От выбранного положения, плюс — вверх. Обычно ноль; полотно не может выходить за низ и верх детали."
   },
   {
     path: "/web/count", group: "web", schema: ["spokeWeb", "count"], applies: isSpokes,
@@ -169,12 +182,12 @@ export const FIELDS = [
   {
     path: "/hub/lowerExtension", group: "hub", schema: ["hub", "lowerExtension"],
     label: "Выступ втулки вниз", symbol: "L_h−", unit: "мм",
-    hint: (description) => `Ниже нижнего торца ${rimWords(description).partOf}. Ноль — вровень.`
+    hint: (description) => `Ниже ${faceWords(description, "lower")}. Ноль — вровень, минус — втулка короче.`
   },
   {
     path: "/hub/upperExtension", group: "hub", schema: ["hub", "upperExtension"],
     label: "Выступ втулки вверх", symbol: "L_h+", unit: "мм",
-    hint: (description) => `Выше верхнего торца ${rimWords(description).partOf}. Ноль — вровень.`
+    hint: (description) => `Выше ${faceWords(description, "upper")}. Ноль — вровень, минус — втулка короче.`
   },
   {
     path: "/bore/shape", group: "bore", kind: "choice",

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "kind": "timingPulley",
   "units": "mm",
   "rim": {
@@ -11,7 +11,8 @@
   "flanges": { "lower": null, "upper": null },
   "web": {
     "type": "spokes",
-    "axialThickness": 4,
+    "thinning": 5,
+    "alignment": "center",
     "axialOffset": 0,
     "count": 6,
     "width": 3,

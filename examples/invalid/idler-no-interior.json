@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "kind": "idlerPulley",
   "units": "mm",
   "rim": {
@@ -13,7 +13,8 @@
   },
   "web": {
     "type": "solid",
-    "axialThickness": 3,
+    "thinning": 3,
+    "alignment": "center",
     "axialOffset": 0
   },
   "hub": {

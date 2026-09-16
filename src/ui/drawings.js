@@ -81,21 +81,24 @@ function wrap(ctx, path, value, inner) {
  * dimension to a label placed away from it.
  */
 function dimension(ctx, path, { a, b, value, label, anchor = "start", ext = [], leader = null, extra = "", u }) {
-  const arrow = u * 0.55;
-  const span = length(sub(b, a));
-  const parts = [extra, ...ext.map(([p, q]) => `<path class="dim-ext" d="M${P(p)}L${P(q)}"/>`)];
-  if (span > 1e-9) {
-    const d = unit(sub(b, a));
-    const inside = span > 2.6 * arrow;
-    const from = inside ? a : sub(a, mul(d, 1.6 * arrow));
-    const to = inside ? b : add(b, mul(d, 1.6 * arrow));
-    parts.push(`<path class="dim-line" d="M${P(from)}L${P(to)}"/>`);
-    parts.push(inside ? arrowhead(a, mul(d, -1), arrow) + arrowhead(b, d, arrow) : arrowhead(a, d, arrow) + arrowhead(b, mul(d, -1), arrow));
-    parts.push(`<path class="dim-hit" d="M${P(from)}L${P(to)}"/>`);
-  }
+  const parts = [extra, ...ext.map(([p, q]) => `<path class="dim-ext" d="M${P(p)}L${P(q)}"/>`), dimensionLine(a, b, u)];
   if (leader) parts.push(`<path class="dim-ext" d="M${P(leader[0])}L${P(leader[1])}"/>`);
   parts.push(labelMarkup(path, value, label, anchor));
   return wrap(ctx, path, value, parts.join(""));
+}
+
+/** The line and arrowheads of a dimension alone; nothing when a and b coincide. */
+function dimensionLine(a, b, u) {
+  const arrow = u * 0.55;
+  const span = length(sub(b, a));
+  if (span <= 1e-9) return "";
+  const d = unit(sub(b, a));
+  const inside = span > 2.6 * arrow;
+  const from = inside ? a : sub(a, mul(d, 1.6 * arrow));
+  const to = inside ? b : add(b, mul(d, 1.6 * arrow));
+  return `<path class="dim-line" d="M${P(from)}L${P(to)}"/>` +
+    (inside ? arrowhead(a, mul(d, -1), arrow) + arrowhead(b, d, arrow) : arrowhead(a, d, arrow) + arrowhead(b, mul(d, -1), arrow)) +
+    `<path class="dim-hit" d="M${P(from)}L${P(to)}"/>`;
 }
 
 function partClass(ctx, group, path) {
@@ -451,35 +454,48 @@ export function renderSection(model, ctx) {
     }));
   }
 
-  // hub extensions: left column, measured from the rim faces
+  // hub extensions: left column, measured from the faces of the part; a short one is labelled outside
   const left = -outer - 1.5 * u;
-  for (const [path, z0, z1, value] of [["/hub/lowerExtension", z.lowerHub, z.rimLower, hub.lowerExtension], ["/hub/upperExtension", z.rimUpper, z.upperHub, hub.upperExtension]]) {
+  const faceLower = derived.faceLowerZ;
+  const faceUpper = derived.faceUpperZ;
+  for (const [path, z0, z1, value, outward] of [["/hub/lowerExtension", z.lowerHub, faceLower, hub.lowerExtension, -1], ["/hub/upperExtension", faceUpper, z.upperHub, hub.upperExtension, 1]]) {
+    const outside = outward > 0 ? Math.max(z0, z1) : Math.min(z0, z1);
     out.push(dimension(ctx, path, {
       u, a: [left, z0], b: [left, z1], value,
       ext: [[[-r.hub - 0.3 * u, z0], [left - 0.4 * u, z0]], [[-r.hub - 0.3 * u, z1], [left - 0.4 * u, z1]]],
-      label: [left - 0.7 * u, value > 0 ? (z0 + z1) / 2 : z0 + Math.sign(z0 || 1) * 0.8 * u], anchor: "end"
+      label: [left - 0.7 * u, value > 0 ? (z0 + z1) / 2 : outside + outward * 0.8 * u], anchor: "end"
     }));
   }
 
-  // web thickness and offset inside the span between hub and rim, left half;
+  // web thinning and shift inside the span between hub and rim, left half;
   // labels are led out past the rim, into the column the hub dimensions use
   const span = Math.max(rimInner - r.hub, 0);
-  const thicknessX = -(r.hub + 0.68 * span);
+  const thinningX = -(r.hub + 0.68 * span);
   const offsetX = -(r.hub + 0.3 * span);
   const labelX = -(outer + 0.8 * u);
-  const thicknessY = z.webUpper + u;
-  const offsetY = Math.min(bottom - 0.6 * u, thicknessY - 1.8 * u);
-  out.push(dimension(ctx, "/web/axialThickness", {
-    u, a: [thicknessX, z.webLower], b: [thicknessX, z.webUpper], value: web.axialThickness,
-    label: [labelX - 0.2 * u, thicknessY], anchor: "end",
-    leader: [[thicknessX, z.webUpper], [labelX, thicknessY]]
+  // the thinning is the room left above and below the web, up to the faces of the part
+  const gaps = [[z.webUpper, faceUpper], [faceLower, z.webLower]].filter(([z0, z1]) => z1 - z0 > 1e-9);
+  const widest = gaps.reduce((best, gap) => !best || gap[1] - gap[0] > best[1] - best[0] ? gap : best, null);
+  const thinningPoint = widest ? [thinningX, (widest[0] + widest[1]) / 2] : [thinningX, z.webUpper];
+  const thinningY = thinningPoint[1] + u;
+  const faceLines = gaps.flatMap((gap) => gap).filter((level) => level === faceUpper || level === faceLower)
+    .map((level) => `<path class="mid-plane" d="M${P([-rimInner, level])}L${P([thinningX - 0.4 * u, level])}"/>`).join("");
+  const gapLines = gaps.slice(1).map(([z0, z1]) => dimensionLine([thinningX, z0], [thinningX, z1], u)).join("");
+  const thinningValue = gaps.length > 1 ? gaps.map(([z0, z1]) => formatNumber(z1 - z0)).join(" + ") : web.thinning;
+  out.push(dimension(ctx, "/web/thinning", {
+    u, a: [thinningX, gaps[0]?.[0] ?? z.webUpper], b: [thinningX, gaps[0]?.[1] ?? z.webUpper], value: thinningValue,
+    extra: faceLines + gapLines,
+    label: [labelX - 0.2 * u, thinningY], anchor: "end",
+    leader: [thinningPoint, [labelX, thinningY]]
   }));
-  // the web mid-plane, dashed, so the offset from z = 0 has something to point at
-  const webMiddle = (z.webLower + z.webUpper) / 2;
+  // the shift from the aligned position: from a face to the web, or between the middles, dashed
+  const offsetFrom = { lower: [faceLower, z.webLower], upper: [faceUpper, z.webUpper], center: [(faceLower + faceUpper) / 2, (z.webLower + z.webUpper) / 2] }[web.alignment];
+  const offsetY = Math.min(bottom - 0.6 * u, thinningY - 1.8 * u);
+  const middles = web.alignment === "center" ? offsetFrom.map((level) => `<path class="mid-plane" d="M${P([-rimInner, level])}L${P([-r.hub, level])}"/>`).join("") : "";
   out.push(dimension(ctx, "/web/axialOffset", {
-    u, a: [offsetX, 0], b: [offsetX, webMiddle], value: web.axialOffset,
-    extra: `<path class="mid-plane" d="M${P([-rimInner, webMiddle])}L${P([-r.hub, webMiddle])}"/>`,
-    leader: [[offsetX, webMiddle / 2], [labelX, offsetY]],
+    u, a: [offsetX, offsetFrom[0]], b: [offsetX, offsetFrom[1]], value: web.axialOffset,
+    extra: middles,
+    leader: [[offsetX, (offsetFrom[0] + offsetFrom[1]) / 2], [labelX, offsetY]],
     label: [labelX - 0.2 * u, offsetY], anchor: "end"
   }));
 

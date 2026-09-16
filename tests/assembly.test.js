@@ -26,14 +26,16 @@ const FLANGE_VARIANTS = {
   both: { lower: { axialThickness: 0.8, radialExtension: 1 }, upper: { axialThickness: 1.2, radialExtension: 1.5 } }
 };
 const SPOKES = { type: "spokes", count: 6, width: 3, filletRadius: 1 };
-// the rim width is 9 in the base example, so ±2.5 with thickness 4 touches a rim end
+// the rim width is 9 in the base example and the flanges add up to 2, so the web is 2…11 thick;
+// an aligned or full web shares its planes with the flanges, the hub or the rim ends
 const WEB_VARIANTS = {
-  solidFull: { type: "solid", axialThickness: 9, axialOffset: 0 },
-  solidThin: { type: "solid", axialThickness: 2, axialOffset: 0.5 },
-  solidAtLower: { type: "solid", axialThickness: 4, axialOffset: -2.5 },
-  spokesCentered: { ...SPOKES, axialThickness: 4, axialOffset: 0 },
-  spokesAtUpper: { ...SPOKES, axialThickness: 4, axialOffset: 2.5 },
-  spokesFull: { ...SPOKES, axialThickness: 9, axialOffset: 0 }
+  solidFull: { type: "solid", thinning: 0, alignment: "lower", axialOffset: 0 },
+  solidThin: { type: "solid", thinning: 7, alignment: "center", axialOffset: 0.5 },
+  solidAtLower: { type: "solid", thinning: 5, alignment: "lower", axialOffset: 0 },
+  solidShifted: { type: "solid", thinning: 6, alignment: "lower", axialOffset: 0.8 },
+  spokesCentered: { ...SPOKES, thinning: 5, alignment: "center", axialOffset: 0 },
+  spokesAtUpper: { ...SPOKES, thinning: 5, alignment: "upper", axialOffset: 0 },
+  spokesFull: { ...SPOKES, thinning: 0, alignment: "center", axialOffset: 0 }
 };
 const HUB_VARIANTS = [[0, 0], [2, 0], [0, 3], [2, 3]];
 // sizes for a 12 mm hub; each shape reaches close to the 1 mm wall limit somewhere
@@ -154,13 +156,13 @@ test("spokes, fillets and windows match the analytic shape at sample points", as
   const base = await readJson("../examples/valid/spokes-flanged.json");
   const wide = structuredClone(base);
   // wide spokes on a small hub: the fillet ends lie below the hub's widest chord
-  Object.assign(wide.web, { count: 3, width: 7.5, filletRadius: 0.8, axialThickness: 5, axialOffset: -2 });
+  Object.assign(wide.web, { count: 3, width: 7.5, filletRadius: 0.8, thinning: 6, alignment: "lower", axialOffset: 0 });
   wide.bore.diameter = 5;
   wide.hub.outerDiameter = 11;
   const narrow = structuredClone(base);
   // narrow spokes on a large rim with coarse arcs: the rim guard vertex matters
   Object.assign(narrow.rim, { toothCount: 120, radialThickness: 1.5 });
-  Object.assign(narrow.web, { count: 12, width: 1, filletRadius: 0.5, axialThickness: 3, axialOffset: 3 });
+  Object.assign(narrow.web, { count: 12, width: 1, filletRadius: 0.5, thinning: 8, alignment: "upper", axialOffset: 0 });
   narrow.generation.maxChordError = 0.25;
   const large = structuredClone(base);
   // large fillets leave corner fills much wider than the sampling margin
@@ -265,8 +267,8 @@ function assertNoDuplicateVertices(mesh, label) {
 function assertExpectedBounds(input, result, label) {
   const { derived } = result;
   const halfWidth = input.rim.width / 2;
-  const lowerZ = Math.min(derived.hubLowerZ, -halfWidth - (input.flanges.lower?.axialThickness ?? 0));
-  const upperZ = Math.max(derived.hubUpperZ, halfWidth + (input.flanges.upper?.axialThickness ?? 0));
+  const lowerZ = -halfWidth - (input.flanges.lower?.axialThickness ?? 0) - Math.max(input.hub.lowerExtension, 0);
+  const upperZ = halfWidth + (input.flanges.upper?.axialThickness ?? 0) + Math.max(input.hub.upperExtension, 0);
   assert.equal(result.mesh.bounds.min[2], lowerZ, `${label}: min z`);
   assert.equal(result.mesh.bounds.max[2], upperZ, `${label}: max z`);
   // a flange edge has a vertex on the +Y ray, so its radius is the exact extent

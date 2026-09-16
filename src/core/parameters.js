@@ -2,11 +2,12 @@ import { boreExtents } from "./contours.js";
 import { spurGearGeometry } from "./involute.js";
 import { PART_KINDS, RIM_FIELDS, rimRadii, rimSizePath, rimSurface } from "./rims.js";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "bore", "generation"];
 const FLANGES_FIELDS = ["lower", "upper"];
 const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
-const SOLID_WEB_FIELDS = ["type", "axialThickness", "axialOffset"];
+const SOLID_WEB_FIELDS = ["type", "thinning", "alignment", "axialOffset"];
+const WEB_ALIGNMENTS = ["lower", "center", "upper"];
 const SPOKE_WEB_FIELDS = [...SOLID_WEB_FIELDS, "count", "width", "filletRadius"];
 const HUB_FIELDS = ["outerDiameter", "lowerExtension", "upperExtension"];
 const BORE_FIELDS = {
@@ -17,6 +18,7 @@ const BORE_FIELDS = {
 };
 const GENERATION_FIELDS = ["maxChordError"];
 const THIN_FEATURE = 1.2; // print recommendation, mm
+const MIN_WEB_THICKNESS = 1; // mm, the web limit of the earlier versions
 
 export function validateDescription(original) {
   const diagnostics = [];
@@ -55,6 +57,9 @@ export function validateDescription(original) {
  * Version 1 kept a round bore as hub.boreDiameter (version 2: bore.shape "round").
  * Versions 1 and 2 were timing pulleys only and called the rim width toothedWidth.
  * Version 3 added the idler pulley and the spur gear without changing older kinds.
+ * Version 4 places the web and the hub against the faces of the part (flanges
+ * included): the web by its thinning and alignment instead of its thickness and
+ * mid-plane, the hub extensions from those faces instead of the rim ends.
  */
 export function upgradeDescription(input) {
   let current = input;
@@ -64,10 +69,44 @@ export function upgradeDescription(input) {
   }
   if (isRecord(current) && current.schemaVersion === 2 && isRecord(current.rim) && Object.hasOwn(current.rim, "toothedWidth")) {
     const rim = replaceKeys(current.rim, { toothedWidth: { width: current.rim.toothedWidth } });
-    current = replaceKeys(current, { schemaVersion: { schemaVersion: SCHEMA_VERSION }, rim: { rim } });
+    current = replaceKeys(current, { schemaVersion: { schemaVersion: 3 }, rim: { rim } });
   }
+  if (isRecord(current) && current.schemaVersion === 3) current = upgradeVersion3(current);
   return current;
 }
+
+/** Version 3 to 4 with the same geometry; a description whose sizes cannot be read is left as it is. */
+function upgradeVersion3(input) {
+  const { rim, flanges, web, hub } = input;
+  const flangeThickness = (side) => isRecord(flanges) && isRecord(flanges[side]) ? flanges[side].axialThickness : 0;
+  const sizes = [rim?.width, flangeThickness("lower"), flangeThickness("upper"), web?.axialThickness, web?.axialOffset, hub?.lowerExtension, hub?.upperExtension];
+  if (!isRecord(rim) || !isRecord(web) || !isRecord(hub) || !sizes.every(Number.isFinite)) return input;
+  const faceLowerZ = -rim.width / 2 - flangeThickness("lower");
+  const faceUpperZ = rim.width / 2 + flangeThickness("upper");
+  const webLowerZ = web.axialOffset - web.axialThickness / 2;
+  const webUpperZ = web.axialOffset + web.axialThickness / 2;
+  // a web against a face keeps that face; any other is centred with its shift
+  const alignment = sameLevel(webLowerZ, faceLowerZ) ? "lower" : sameLevel(webUpperZ, faceUpperZ) ? "upper" : "center";
+  const placement = {
+    thinning: tidy(faceUpperZ - faceLowerZ - web.axialThickness),
+    alignment,
+    axialOffset: alignment === "center" ? tidy(web.axialOffset - (faceLowerZ + faceUpperZ) / 2) : 0
+  };
+  return replaceKeys(input, {
+    schemaVersion: { schemaVersion: SCHEMA_VERSION },
+    web: { web: replaceKeys(web, { axialThickness: placement, axialOffset: {} }) },
+    hub: {
+      hub: replaceKeys(hub, {
+        lowerExtension: { lowerExtension: tidy(hub.lowerExtension - flangeThickness("lower")) },
+        upperExtension: { upperExtension: tidy(hub.upperExtension - flangeThickness("upper")) }
+      })
+    }
+  });
+}
+
+const sameLevel = (a, b) => Math.abs(a - b) < 1e-9;
+// differences of decimal sizes: 2 − 0.8 gives 1.2, not 1.2000000000000002
+const tidy = (value) => Math.round(value * 1e9) / 1e9;
 
 /** Copy of an object where each key of `replacements` is replaced, in place, by the keys of its value. */
 function replaceKeys(object, replacements) {
@@ -137,8 +176,9 @@ function validateStatic(input, diagnostics) {
     const fields = input.web.type === "spokes" ? SPOKE_WEB_FIELDS : SOLID_WEB_FIELDS;
     if (exactObject(input.web, fields, "/web", diagnostics)) {
       enumeration(input.web.type, ["solid", "spokes"], "/web/type", diagnostics);
-      numberRange(input.web.axialThickness, 1, 50, "/web/axialThickness", diagnostics);
-      numberRange(input.web.axialOffset, -24.5, 24.5, "/web/axialOffset", diagnostics);
+      numberRange(input.web.thinning, 0, 59, "/web/thinning", diagnostics);
+      enumeration(input.web.alignment, WEB_ALIGNMENTS, "/web/alignment", diagnostics);
+      numberRange(input.web.axialOffset, -60, 60, "/web/axialOffset", diagnostics);
       if (input.web.type === "spokes") {
         integerRange(input.web.count, 3, 12, "/web/count", diagnostics);
         numberRange(input.web.width, 1, 20, "/web/width", diagnostics);
@@ -149,8 +189,9 @@ function validateStatic(input, diagnostics) {
 
   if (exactObject(input.hub, HUB_FIELDS, "/hub", diagnostics)) {
     numberRange(input.hub.outerDiameter, 2, 100, "/hub/outerDiameter", diagnostics);
-    numberRange(input.hub.lowerExtension, 0, 50, "/hub/lowerExtension", diagnostics);
-    numberRange(input.hub.upperExtension, 0, 50, "/hub/upperExtension", diagnostics);
+    // a negative extension ends the hub inside the flange zone, the thickest flange at most
+    numberRange(input.hub.lowerExtension, -5, 50, "/hub/lowerExtension", diagnostics);
+    numberRange(input.hub.upperExtension, -5, 50, "/hub/upperExtension", diagnostics);
   }
   if (isRecord(input.bore)) {
     const fields = BORE_FIELDS[input.bore.shape] ?? BORE_FIELDS.round;
@@ -211,10 +252,25 @@ function validateRelations(input, derived, diagnostics) {
     diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", rimSizePath(input.kind)],
       { span, minimum: minimumWebSpan(input.web.type), maxHubDiameter: 2 * (derived.rimInnerRadius - minimumWebSpan(input.web.type)) }));
   }
-  const rimUpperZ = input.rim.width / 2;
-  if (derived.webLowerZ < -rimUpperZ || derived.webUpperZ > rimUpperZ) {
-    diagnostics.push(diagnostic("E_WEB_AXIAL_RANGE", "error", "description", ["/web/axialThickness", "/web/axialOffset", "/rim/width"],
-      { webLowerZ: derived.webLowerZ, webUpperZ: derived.webUpperZ, rimLowerZ: -rimUpperZ, rimUpperZ }));
+  const { faceLowerZ, faceUpperZ, webLowerZ, webUpperZ, hubLowerZ, hubUpperZ } = derived;
+  if (derived.webThickness < MIN_WEB_THICKNESS) {
+    diagnostics.push(diagnostic("E_WEB_THINNING", "error", "description", ["/web/thinning", "/rim/width"],
+      { thickness: derived.webThickness, minimum: MIN_WEB_THICKNESS, maximum: faceUpperZ - faceLowerZ - MIN_WEB_THICKNESS }));
+  } else if (webLowerZ < faceLowerZ - 1e-9 || webUpperZ > faceUpperZ + 1e-9) {
+    // each check speaks only when the ones before it pass: the levels of a too thin web
+    // mean little, and a hub cannot be long enough for a web outside the part
+    diagnostics.push(diagnostic("E_WEB_AXIAL_RANGE", "error", "description", ["/web/axialOffset", "/web/thinning", "/web/alignment"],
+      { webLowerZ, webUpperZ, faceLowerZ, faceUpperZ }));
+  } else {
+    // the hub carries the web, so it spans the web levels
+    if (hubLowerZ > webLowerZ + 1e-9) {
+      diagnostics.push(diagnostic("E_HUB_SHORT", "error", "description", ["/hub/lowerExtension", "/web/axialOffset", "/web/alignment"],
+        { hubZ: hubLowerZ, webZ: webLowerZ, minimum: faceLowerZ - webLowerZ }));
+    }
+    if (hubUpperZ < webUpperZ - 1e-9) {
+      diagnostics.push(diagnostic("E_HUB_SHORT", "error", "description", ["/hub/upperExtension", "/web/axialOffset", "/web/alignment"],
+        { hubZ: hubUpperZ, webZ: webUpperZ, minimum: webUpperZ - faceUpperZ }));
+    }
   }
   if (input.web.type === "spokes") {
     const { count, width, filletRadius } = input.web;
@@ -248,7 +304,7 @@ function minimumWebSpan(webType) {
 function addWarnings(input, derived, diagnostics) {
   const hubWall = derived.hubRadius - derived.boreOuterRadius;
   if (input.rim.radialThickness < THIN_FEATURE) diagnostics.push(thin("/rim/radialThickness", input.rim.radialThickness));
-  if (input.web.axialThickness < THIN_FEATURE) diagnostics.push(thin("/web/axialThickness", input.web.axialThickness));
+  if (derived.webThickness < THIN_FEATURE) diagnostics.push(thin("/web/thinning", derived.webThickness));
   if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
   if (hubWall < THIN_FEATURE) diagnostics.push(thin("/hub/outerDiameter", hubWall));
   if (input.kind === "timingPulley") diagnostics.push(diagnostic("W_EXPERIMENTAL_PROFILE", "warning", "build", ["/rim/profile"]));
@@ -276,17 +332,24 @@ function derive(input) {
   const bore = boreExtents(input.bore);
   const hubRadius = input.hub.outerDiameter / 2;
   const halfWidth = input.rim.width / 2;
-  const webLowerZ = input.web.axialOffset - input.web.axialThickness / 2;
-  const webUpperZ = input.web.axialOffset + input.web.axialThickness / 2;
-  const hubLowerZ = -halfWidth - input.hub.lowerExtension;
-  const hubUpperZ = halfWidth + input.hub.upperExtension;
+  // faces of the part: flange far faces, or rim ends without flanges
+  const faceLowerZ = input.flanges.lower ? -halfWidth - input.flanges.lower.axialThickness : -halfWidth;
+  const faceUpperZ = input.flanges.upper ? halfWidth + input.flanges.upper.axialThickness : halfWidth;
+  const { thinning, alignment, axialOffset } = input.web;
+  const webThickness = faceUpperZ - faceLowerZ - thinning;
+  // each web plane is counted from its own face, so a web without thinning or shift
+  // lies exactly on the faces; the mesh shares vertices only between equal levels
+  const [lowerCut, upperCut] = { lower: [0, thinning], upper: [thinning, 0], center: [thinning / 2, thinning / 2] }[alignment];
+  const levels = [faceLowerZ, -halfWidth, halfWidth, faceUpperZ];
+  const webLowerZ = snapLevel(faceLowerZ + lowerCut + axialOffset, levels);
+  const webUpperZ = snapLevel(faceUpperZ - upperCut + axialOffset, levels);
+  const hubLowerZ = snapLevel(faceLowerZ - input.hub.lowerExtension, [...levels, webLowerZ, webUpperZ]);
+  const hubUpperZ = snapLevel(faceUpperZ + input.hub.upperExtension, [...levels, webLowerZ, webUpperZ]);
   // a smooth surface is exactly outsideRadius; the tooth profile is measured as built
   const surfaceBound = toothed ? Math.max(...rimSurface(input.kind, input.rim, radii).points.map(([x, y]) => Math.hypot(x, y))) : outsideRadius;
   const radialBound = Math.max(surfaceBound,
     input.flanges.lower ? outsideRadius + input.flanges.lower.radialExtension : 0,
     input.flanges.upper ? outsideRadius + input.flanges.upper.radialExtension : 0);
-  const lowerFlangeZ = input.flanges.lower ? -halfWidth - input.flanges.lower.axialThickness : -halfWidth;
-  const upperFlangeZ = input.flanges.upper ? halfWidth + input.flanges.upper.axialThickness : halfWidth;
   return {
     // belt pitch of a timing pulley, circular pitch πm of a gear
     pitch: input.kind === "timingPulley" ? 2 : input.kind === "spurGear" ? Math.PI * input.rim.module : null,
@@ -300,6 +363,9 @@ function derive(input) {
     boreOuterRadius: bore.outerRadius,
     boreExtentX: { positive: bore.positiveX, negative: bore.negativeX },
     hubRadius,
+    faceLowerZ,
+    faceUpperZ,
+    webThickness,
     webLowerZ,
     webUpperZ,
     hubLowerZ,
@@ -307,10 +373,15 @@ function derive(input) {
     lowerFlangeOuterRadius: input.flanges.lower ? outsideRadius + input.flanges.lower.radialExtension : null,
     upperFlangeOuterRadius: input.flanges.upper ? outsideRadius + input.flanges.upper.radialExtension : null,
     bounds: {
-      min: [-radialBound, -radialBound, Math.min(hubLowerZ, lowerFlangeZ)],
-      max: [radialBound, radialBound, Math.max(hubUpperZ, upperFlangeZ)]
+      min: [-radialBound, -radialBound, Math.min(hubLowerZ, faceLowerZ)],
+      max: [radialBound, radialBound, Math.max(hubUpperZ, faceUpperZ)]
     }
   };
+}
+
+/** A level within rounding of a rim end or a face is that level: 5.7 − 1.2 is not quite 4.5. */
+function snapLevel(z, levels) {
+  return levels.find((level) => Math.abs(z - level) < 1e-9) ?? z;
 }
 
 function normalize(input) {
@@ -320,7 +391,8 @@ function normalize(input) {
   };
   const web = {
     type: input.web.type,
-    axialThickness: input.web.axialThickness,
+    thinning: input.web.thinning,
+    alignment: input.web.alignment,
     axialOffset: input.web.axialOffset
   };
   if (input.web.type === "spokes") Object.assign(web, {

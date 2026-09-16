@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gears.local/schemas/pulley-v3.schema.json",
-  "title": "Gears pulley description, version 3",
+  "$id": "https://gears.local/schemas/pulley-v4.schema.json",
+  "title": "Gears pulley description, version 4",
   "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley or an involute spur gear. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
@@ -18,8 +18,8 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 3,
-      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only; readers upgrade them. Version 3 added the idler pulley and the spur gear."
+      "const": 4,
+      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only, version 3 added the idler pulley and the spur gear but placed the web by thickness and mid-plane and measured hub extensions from the rim ends; readers upgrade them. Version 4 places the web and the hub against the faces of the part."
     },
     "kind": {
       "enum": ["timingPulley", "idlerPulley", "spurGear"],
@@ -87,7 +87,7 @@
           "minimum": 2,
           "maximum": 50,
           "default": 6,
-          "description": "Axial width of the rim working surface, centered on z=0 from -width/2 to +width/2; flanges and hub extensions are outside it."
+          "description": "Axial width of the rim working surface, centered on z=0 from -width/2 to +width/2. Flanges add their thickness outside it; the faces of the part are the flange far faces, or the rim ends without flanges."
         },
         "radialThickness": {
           "type": "number",
@@ -224,32 +224,38 @@
     },
     "webPlacement": {
       "properties": {
-        "axialThickness": {
+        "thinning": {
           "type": "number",
-          "minimum": 1,
-          "maximum": 50,
-          "default": 3,
-          "description": "Axial thickness of the web or spokes."
+          "minimum": 0,
+          "maximum": 59,
+          "default": 0,
+          "description": "How much thinner the web or spokes are than the part between its faces; 0 is a web through the whole height, flanges included. The web keeps at least 1 mm."
+        },
+        "alignment": {
+          "enum": ["lower", "center", "upper"],
+          "default": "lower",
+          "description": "Face the web is placed against: its lower plane on the lower face, its upper plane on the upper face, or centred between them."
         },
         "axialOffset": {
           "type": "number",
-          "minimum": -24.5,
-          "maximum": 24.5,
+          "minimum": -60,
+          "maximum": 60,
           "default": 0,
-          "description": "Z coordinate of the web mid-plane relative to the rim mid-plane at z=0; positive is toward the upper side."
+          "description": "Shift of the web from its aligned position; positive is toward the upper side. The web stays between the faces of the part."
         }
       }
     },
     "solidWeb": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "axialThickness", "axialOffset"],
+      "required": ["type", "thinning", "alignment", "axialOffset"],
       "properties": {
         "type": {
           "const": "solid",
           "description": "A continuous annular web between hub and rim."
         },
-        "axialThickness": { "$ref": "#/$defs/webPlacement/properties/axialThickness" },
+        "thinning": { "$ref": "#/$defs/webPlacement/properties/thinning" },
+        "alignment": { "$ref": "#/$defs/webPlacement/properties/alignment" },
         "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" }
       }
     },
@@ -258,7 +264,8 @@
       "additionalProperties": false,
       "required": [
         "type",
-        "axialThickness",
+        "thinning",
+        "alignment",
         "axialOffset",
         "count",
         "width",
@@ -269,7 +276,8 @@
           "const": "spokes",
           "description": "Equally spaced straight radial spokes with mandatory in-plane fillets."
         },
-        "axialThickness": { "$ref": "#/$defs/webPlacement/properties/axialThickness" },
+        "thinning": { "$ref": "#/$defs/webPlacement/properties/thinning" },
+        "alignment": { "$ref": "#/$defs/webPlacement/properties/alignment" },
         "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" },
         "count": {
           "type": "integer",
@@ -308,17 +316,17 @@
         },
         "lowerExtension": {
           "type": "number",
-          "minimum": 0,
+          "minimum": -5,
           "maximum": 50,
           "default": 0,
-          "description": "Hub projection below the lower rim face at z=-width/2."
+          "description": "Hub projection below the lower face of the part (lower flange far face or rim end); 0 is flush, negative ends the hub above that face. The hub always spans the web."
         },
         "upperExtension": {
           "type": "number",
-          "minimum": 0,
+          "minimum": -5,
           "maximum": 50,
           "default": 0,
-          "description": "Hub projection above the upper rim face at z=+width/2."
+          "description": "Hub projection above the upper face of the part (upper flange far face or rim end); 0 is flush, negative ends the hub below that face. The hub always spans the web."
         }
       }
     },

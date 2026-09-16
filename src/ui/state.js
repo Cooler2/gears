@@ -8,6 +8,7 @@
 
 import { upgradeDescription } from "../core/parameters.js";
 
+const WEB_PLACEMENT = ["thinning", "alignment", "axialOffset"];
 const BORE_EXTRAS = { round: [], polygon: ["sides"], dFlat: ["flatDistance"], keyed: ["keyWidth", "keyDepth"] };
 
 export function defaultDescription(schema, kind = "timingPulley") {
@@ -24,7 +25,7 @@ export function defaultDescription(schema, kind = "timingPulley") {
     units: "mm",
     rim: { ...rim, width: value("rimPlacement", "width"), radialThickness: value("rimPlacement", "radialThickness") },
     flanges: { lower: null, upper: null },
-    web: { type: "solid", axialThickness: value("webPlacement", "axialThickness"), axialOffset: value("webPlacement", "axialOffset") },
+    web: { type: "solid", ...Object.fromEntries(WEB_PLACEMENT.map((field) => [field, value("webPlacement", field)])) },
     hub: {
       outerDiameter: value("hub", "outerDiameter"),
       lowerExtension: value("hub", "lowerExtension"),
@@ -64,7 +65,7 @@ export function setWebType(state, type) {
   const { web } = state.description;
   if (web.type === type) return state;
   const next = structuredClone(state);
-  const placement = { axialThickness: web.axialThickness, axialOffset: web.axialOffset };
+  const placement = Object.fromEntries(WEB_PLACEMENT.map((field) => [field, web[field]]));
   if (type === "solid") {
     next.remembered.spokes = { count: web.count, width: web.width, filletRadius: web.filletRadius };
     next.description.web = { type, ...placement };

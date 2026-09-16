@@ -3,7 +3,7 @@
 import { formatNumber as n } from "./format.js";
 
 const TEXTS = {
-  E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion от 1 до 3.",
+  E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion от 1 до 4.",
   E_SCHEMA_VALUE: ({ rule, minimum, maximum, expected }) => {
     if (rule === "numberRange") return `Нужно число от ${n(minimum)} до ${n(maximum)}.`;
     if (rule === "integerRange") return `Нужно целое число от ${minimum} до ${maximum}.`;
@@ -27,8 +27,14 @@ const TEXTS = {
         ? `Диаметр втулки — не больше ${n(maxHubDiameter)} мм, или возьмите ${rim[1]} либо ${rim[2]}.`
         : `Возьмите ${rim[1]} или ${rim[2]}.`);
   },
-  E_WEB_AXIAL_RANGE: ({ webLowerZ, webUpperZ, rimLowerZ, rimUpperZ }) =>
-    `Полотно выходит за торцы: оно занимает ${n(webLowerZ)}…${n(webUpperZ)} мм по высоте, а торцы находятся на ${n(rimLowerZ)} и ${n(rimUpperZ)} мм.`,
+  E_WEB_AXIAL_RANGE: ({ webLowerZ, webUpperZ, faceLowerZ, faceUpperZ }) =>
+    `Полотно выходит за деталь: оно занимает ${n(webLowerZ)}…${n(webUpperZ)} мм по высоте, а деталь — ${n(faceLowerZ)}…${n(faceUpperZ)} мм. Уменьшите сдвиг.`,
+  E_WEB_THINNING: ({ thickness, minimum, maximum }) =>
+    `Полотно получается толщиной ${n(thickness)} мм, нужно не меньше ${n(minimum)} мм: утонение — не больше ${n(maximum)} мм.`,
+  // the lower end of the hub is above the web, or the upper one below it
+  E_HUB_SHORT: ({ hubZ, webZ, minimum }) => hubZ > webZ
+    ? `Втулка кончается выше полотна: её низ на ${n(hubZ)} мм, а низ полотна на ${n(webZ)} мм. Выступ втулки вниз — не меньше ${n(minimum)} мм.`
+    : `Втулка кончается ниже полотна: её верх на ${n(hubZ)} мм, а верх полотна на ${n(webZ)} мм. Выступ втулки вверх — не меньше ${n(minimum)} мм.`,
   E_SPOKE_FILLET: ({ maxByWidth, maxBySpan }, smooth) => maxBySpan === undefined
     ? `Радиус скругления — не больше половины ширины спицы, ${n(maxByWidth)} мм.`
     : `Радиус скругления — не больше ${n(Math.min(maxByWidth, maxBySpan))} мм: он ограничен половиной ширины спицы (${n(maxByWidth)} мм) ` +

@@ -10,7 +10,7 @@ import { PRESETS } from "../src/ui/presets.js";
 import { createState, getValue, keepShaft, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setValue, setWebType } from "../src/ui/state.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
-const schema = await readJson("../schemas/pulley-v3.schema.json");
+const schema = await readJson("../schemas/pulley-v4.schema.json");
 const exampleNames = async (kind) => (await readdir(new URL(`../examples/${kind}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();
 const numeric = (field) => !field.kind;
 
@@ -153,7 +153,7 @@ test("defaults validate and the form state keeps hidden values", () => {
   const spokes = setValue(setWebType(state, "spokes"), "/web/width", 4);
   assert.equal(state.description.web.type, "solid", "updates never mutate the previous state");
   const solid = setWebType(spokes, "solid");
-  assert.deepEqual(Object.keys(solid.description.web).sort(), ["axialOffset", "axialThickness", "type"]);
+  assert.deepEqual(Object.keys(solid.description.web).sort(), ["alignment", "axialOffset", "thinning", "type"]);
   assert.equal(validateDescription(solid.description).ok, true, "a solid web carries no spoke fields");
   assert.equal(setWebType(solid, "spokes").description.web.width, 4);
 
@@ -182,7 +182,9 @@ test("a form state saved with a version 1 description is upgraded", () => {
   const { description } = createState(schema);
   const { bore, ...rest } = description;
   const { width, ...rim } = description.rim;
-  const legacy = { ...rest, schemaVersion: 1, rim: { ...rim, toothedWidth: width }, hub: { boreDiameter: 6, ...description.hub } };
+  // the default web has no thinning and no flanges around it: version 3 called it as thick as the rim
+  const web = { type: "solid", axialThickness: width, axialOffset: 0 };
+  const legacy = { ...rest, schemaVersion: 1, rim: { ...rim, toothedWidth: width }, web, hub: { boreDiameter: 6, ...description.hub } };
   const saved = { description: legacy, remembered: { spokes: { count: 4, width: 2, filletRadius: 1 }, flanges: createState(schema).remembered.flanges } };
   const restored = restoreState(schema, saved);
   assert.deepEqual(restored.description, { ...description, bore: { shape: "round", diameter: 6 } });

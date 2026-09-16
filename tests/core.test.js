@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildPlanView, generatePulley, validateDescription, verifyMesh } from "../src/core/generate.js";
-import { buildCircleContour, buildGt2Contour, circleSegmentCount } from "../src/core/contours.js";
+import { buildBoreContour, buildCircleContour, buildGt2Contour, buildMarkedCircle, circleSegmentCount } from "../src/core/contours.js";
 import { rimSurface } from "../src/core/rims.js";
 import { exportBinaryStl } from "../src/export/stl.js";
 
@@ -40,7 +40,7 @@ test("documented stage-2 example builds a deterministic closed solid", async () 
 
 test("thin centered web creates valid shared-boundary steps", async () => {
   const input = await readJson("../examples/valid/solid-basic.json");
-  input.web.axialThickness = 2;
+  Object.assign(input.web, { thinning: 4, alignment: "center" });
   const result = generatePulley(input);
   assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
   assert.equal(result.derived.webLowerZ, -1);
@@ -55,7 +55,7 @@ test("supported tooth-count and placement boundaries build closed meshes", async
   minimum.rim.toothCount = 14;
   minimum.rim.radialThickness = 1;
   minimum.rim.width = 2;
-  minimum.web.axialThickness = 2;
+  minimum.web.thinning = 0;
   minimum.bore.diameter = 0.5;
   minimum.hub.outerDiameter = 2.5;
   minimum.generation.maxChordError = 0.25;
@@ -63,8 +63,7 @@ test("supported tooth-count and placement boundaries build closed meshes", async
   maximum.rim.toothCount = 120;
   maximum.rim.width = 50;
   maximum.rim.radialThickness = 25;
-  maximum.web.axialThickness = 1;
-  maximum.web.axialOffset = 24.5;
+  Object.assign(maximum.web, { thinning: 49, alignment: "upper" });
   maximum.bore.diameter = 0.5;
   maximum.hub.outerDiameter = 2.5;
   maximum.generation.maxChordError = 0.01;
@@ -131,6 +130,8 @@ test("cross-field invalid examples return their documented diagnostics", async (
     "bore-key.json": "E_BORE_KEY",
     "radial-order.json": "E_RADIAL_ORDER",
     "web-outside-rim.json": "E_WEB_AXIAL_RANGE",
+    "web-too-thin.json": "E_WEB_THINNING",
+    "hub-short.json": "E_HUB_SHORT",
     "spoke-overlap.json": "E_SPOKE_OVERLAP",
     "spoke-fillet.json": "E_SPOKE_FILLET",
     "idler-no-interior.json": "E_RIM_NO_INTERIOR",
@@ -187,28 +188,62 @@ test("bore rules keep the axis inside and measure the hub wall at the farthest p
   assert.deepEqual(derived.boreExtentX, { positive: 2.5 * Math.cos(Math.PI / 5), negative: 2.5 }, "an odd polygon has a vertex at −X");
 });
 
-test("version 1 and 2 descriptions are read as version 3", async () => {
+test("version 1, 2 and 3 descriptions are read as version 4", async () => {
   const current = await readJson("../examples/valid/spokes-flanged.json");
+  // version 3: the web by thickness and mid-plane, hub extensions from the rim ends (flanges 0.8 and 1.2)
+  const { thinning, alignment, axialOffset, ...spokes } = current.web;
+  const version3 = {
+    ...structuredClone(current), schemaVersion: 3,
+    web: { type: spokes.type, axialThickness: 4, axialOffset: 0, count: spokes.count, width: spokes.width, filletRadius: spokes.filletRadius },
+    hub: { outerDiameter: current.hub.outerDiameter, lowerExtension: 2, upperExtension: 3 }
+  };
   // version 2: the rim width was toothedWidth; version 1 also kept the bore in the hub
   const rim = Object.fromEntries(Object.entries(current.rim).map(([key, value]) => [key === "width" ? "toothedWidth" : key, value]));
-  const version2 = { ...structuredClone(current), schemaVersion: 2, rim };
+  const version2 = { ...structuredClone(version3), schemaVersion: 2, rim };
   const { bore, ...rest } = version2;
-  const version1 = { ...rest, schemaVersion: 1, hub: { boreDiameter: bore.diameter, ...current.hub } };
+  const version1 = { ...rest, schemaVersion: 1, hub: { boreDiameter: bore.diameter, ...version3.hub } };
   const mesh = generatePulley(current).mesh;
-  for (const legacy of [version1, version2]) {
+  for (const legacy of [version1, version2, version3]) {
     const snapshot = structuredClone(legacy);
     const result = generatePulley(legacy);
     assert.deepEqual(legacy, snapshot, "the input is not modified");
     assert.deepEqual(result.normalized, current);
     assert.deepEqual(Object.keys(result.normalized), Object.keys(current), "bore follows hub");
     assert.deepEqual(Object.keys(result.normalized.rim), Object.keys(current.rim), "width keeps its place");
+    assert.deepEqual(Object.keys(result.normalized.web), Object.keys(current.web), "the placement keeps its place");
     assert.deepEqual(result.mesh, mesh);
   }
   // the current version with an old field is still strict
   const mixed = { ...structuredClone(current), hub: { ...current.hub, boreDiameter: 5 } };
   assert.ok(validateDescription(mixed).diagnostics.some(({ paths }) => paths.includes("/hub/boreDiameter")));
   assert.ok(validateDescription({ ...current, rim }).diagnostics.some(({ paths }) => paths.includes("/rim/toothedWidth")));
-  assert.ok(validateDescription({ ...current, schemaVersion: 4 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+  assert.ok(validateDescription({ ...current, schemaVersion: 5 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+  assert.ok(validateDescription({ ...version3, schemaVersion: 4 }).diagnostics.some(({ paths }) => paths.includes("/web/axialThickness")));
+
+  // a version 3 web against a face of the part is aligned to it, any other is centred; the levels stay
+  const cases = [
+    // no lower flange: the web against the rim end; the hub extension loses the upper flange
+    [{ lower: 0, upper: 1, thickness: 3, offset: -3, hub: [0, 2] }, { thinning: 7, alignment: "lower", axialOffset: 0 }, [0, 1]],
+    // upper side without a flange, a web against the rim end
+    [{ lower: 0, upper: 0, thickness: 4, offset: 2.5, hub: [0, 2] }, { thinning: 5, alignment: "upper", axialOffset: 0 }, [0, 2]],
+    // a web against the rim end under a flange is centred with a shift
+    [{ lower: 1, upper: 0, thickness: 3, offset: -3, hub: [0, 0] }, { thinning: 7, alignment: "center", axialOffset: -2.5 }, [-1, 0]]
+  ];
+  for (const [old, web, hub] of cases) {
+    const flange = (thickness) => thickness ? { axialThickness: thickness, radialExtension: 1 } : null;
+    const legacy = {
+      ...structuredClone(version3), flanges: { lower: flange(old.lower), upper: flange(old.upper) },
+      web: { ...version3.web, axialThickness: old.thickness, axialOffset: old.offset },
+      hub: { ...version3.hub, lowerExtension: old.hub[0], upperExtension: old.hub[1] }
+    };
+    const { normalized, derived } = validateDescription(legacy);
+    const label = JSON.stringify(old);
+    assert.deepEqual({ thinning: normalized.web.thinning, alignment: normalized.web.alignment, axialOffset: normalized.web.axialOffset }, web, label);
+    assert.deepEqual([normalized.hub.lowerExtension, normalized.hub.upperExtension], hub, label);
+    assert.ok(Math.abs(derived.webLowerZ - (old.offset - old.thickness / 2)) < 1e-12 && Math.abs(derived.webUpperZ - (old.offset + old.thickness / 2)) < 1e-12, label);
+    assert.equal(derived.hubLowerZ, -4.5 - old.hub[0], label);
+    assert.equal(derived.hubUpperZ, 4.5 + old.hub[1], label);
+  }
 });
 
 test("an idler pulley has a smooth rim of its diameter and shares the rest", async () => {
@@ -342,26 +377,28 @@ test("validation is finite, strict, and does not mutate its input", async () => 
   const input = await readJson("../examples/valid/solid-basic.json");
   const snapshot = structuredClone(input);
   input.bore.diameter = NaN;
-  input.web.axialThickness = Infinity;
+  input.web.thinning = Infinity;
   input.rim.extra = 1;
   const result = validateDescription(input);
   assert.equal(result.ok, false);
-  for (const path of ["/bore/diameter", "/web/axialThickness", "/rim/extra"]) {
+  for (const path of ["/bore/diameter", "/web/thinning", "/rim/extra"]) {
     assert.ok(result.diagnostics.some(({ code, paths }) => code === "E_SCHEMA_VALUE" && paths.includes(path)), path);
   }
   delete input.rim.extra;
   input.bore.diameter = snapshot.bore.diameter;
-  input.web.axialThickness = snapshot.web.axialThickness;
+  input.web.thinning = snapshot.web.thinning;
   assert.deepEqual(input, snapshot);
 });
 
 test("anchors come with the normalized description, without building a mesh", async () => {
   const input = await readJson("../examples/valid/spokes-flanged.json");
   const { anchors, derived } = validateDescription(input);
-  assert.deepEqual(anchors.zLevels, {
+  const levels = {
     lowerHub: -6.5, lowerFlange: -5.3, rimLower: -4.5, webLower: -2,
     webUpper: 2, rimUpper: 4.5, upperFlange: 5.7, upperHub: 7.5
-  });
+  };
+  assert.deepEqual(Object.keys(anchors.zLevels), Object.keys(levels));
+  for (const [name, level] of Object.entries(levels)) assert.ok(Math.abs(anchors.zLevels[name] - level) < 1e-12, name);
   assert.equal(anchors.radii.bore, 2.6);
   assert.equal(anchors.radii.pitch, derived.pitchRadius);
   assert.deepEqual(generatePulley(input).anchors, anchors);
@@ -447,8 +484,9 @@ test("every valid example builds a closed solid of the expected size", async () 
     const tolerance = toothed ? 1e-9 : input.generation.maxChordError;
     const flangeRadii = [flanges.lower, flanges.upper].filter(Boolean).map((flange) => outsideRadius + flange.radialExtension);
     const radius = Math.max(outsideRadius, ...flangeRadii);
-    const bottom = -rim.width / 2 - Math.max(hub.lowerExtension, flanges.lower?.axialThickness ?? 0);
-    const top = rim.width / 2 + Math.max(hub.upperExtension, flanges.upper?.axialThickness ?? 0);
+    // hub extensions count from the faces of the part, a negative one stays inside
+    const bottom = -rim.width / 2 - (flanges.lower?.axialThickness ?? 0) - Math.max(hub.lowerExtension, 0);
+    const top = rim.width / 2 + (flanges.upper?.axialThickness ?? 0) + Math.max(hub.upperExtension, 0);
     const { min, max } = result.mesh.bounds;
     // a gear has a tooth tip on +Y, not necessarily on the X axis
     if (gear) assert.ok(Math.abs(max[1] - radius) < 1e-9 && max[0] <= radius && -min[0] <= radius, `${name}: radius ${max[1]} vs ${radius}`);
@@ -456,6 +494,50 @@ test("every valid example builds a closed solid of the expected size", async () 
     assert.ok(Math.abs(min[2] - bottom) < 1e-12 && Math.abs(max[2] - top) < 1e-12, `${name}: height`);
   }
 });
+
+test("examples lie flat on their lower face, and a solid one covers it completely", async () => {
+  // one example keeps the hub out on both sides to show that it can
+  const raised = new Set(["spokes-flanged.json"]);
+  for (const name of await exampleNames("valid")) {
+    if (raised.has(name)) continue;
+    const input = await readJson(`../examples/valid/${name}`);
+    const result = generatePulley(input);
+    const { derived, mesh } = result;
+    const bottom = derived.faceLowerZ;
+    assert.equal(mesh.bounds.min[2], bottom, name);
+    assert.equal(derived.webLowerZ, bottom, `${name}: web`);
+    assert.equal(derived.hubLowerZ, bottom, `${name}: hub`);
+    // the faces at the bottom level, projected: bore to the rim or the flange edge for a solid web
+    let area = 0;
+    for (let face = 0; face < mesh.indices.length; face += 3) {
+      const points = [...mesh.indices.slice(face, face + 3)].map((id) => mesh.vertices.slice(id * 3, id * 3 + 3));
+      if (!points.every((point) => point[2] === bottom)) continue;
+      const [a, b, c] = points;
+      area -= ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2; // facing −Z
+    }
+    if (input.web.type !== "solid") {
+      assert.ok(area > 0, `${name}: spokes and hub at the bottom`);
+      continue;
+    }
+    const error = input.generation.maxChordError;
+    const surface = rimSurface(input.kind, input.rim, { outside: derived.outsideRadius }, error);
+    const outline = input.flanges.lower
+      ? contourArea(buildMarkedCircle(derived.lowerFlangeOuterRadius, circleSegmentCount(derived.lowerFlangeOuterRadius, error), surface.marks).points)
+      : contourArea(surface.points);
+    const expected = outline - contourArea(buildBoreContour(input.bore, error).points);
+    assert.ok(Math.abs(area - expected) < 1e-9 * expected, `${name}: bottom area ${area} vs ${expected}`);
+  }
+});
+
+function contourArea(points) {
+  let area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const [x0, y0] = points[index];
+    const [x1, y1] = points[(index + 1) % points.length];
+    area += x1 * y0 - x0 * y1; // contours run clockwise
+  }
+  return area / 2;
+}
 
 async function exampleNames(group) {
   return (await readdir(new URL(`../examples/${group}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();

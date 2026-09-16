@@ -39,7 +39,7 @@ const el = {
 
 let schema, presets;
 try {
-  schema = await fetchJson("../../schemas/pulley-v3.schema.json");
+  schema = await fetchJson("../../schemas/pulley-v4.schema.json");
   presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(`../../examples/valid/${preset.file}`) })));
 } catch (error) {
   $("#boot").className = "notice notice-error";
@@ -237,6 +237,7 @@ function toggleMarkup(field, description) {
     <label class="toggle" for="${id}"><input id="${id}" type="checkbox" data-path="${field.path}"${checked ? " checked" : ""} aria-describedby="${id}-hint">
       <span>${escapeHtml(fieldLabel(field, description))}</span></label>
     <p class="field-hint" id="${id}-hint">${escapeHtml(fieldHint(field, description))}</p>
+    <div class="field-msg" aria-live="polite"></div>
   </div>`;
 }
 
@@ -247,6 +248,7 @@ function choiceMarkup(field, description) {
     <legend>${escapeHtml(fieldLabel(field, description))}</legend>
     <div class="segmented">${field.options.map((option) => `<label><input type="radio" name="${name}" value="${option.value}" data-path="${field.path}"${option.value === value ? " checked" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("")}</div>
     <p class="field-hint">${escapeHtml(fieldHint(field, description))}</p>
+    <div class="field-msg" aria-live="polite"></div>
   </fieldset>`;
 }
 
@@ -263,7 +265,9 @@ function computedMarkup() {
       timingPulley: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]]
     }[model.normalized.kind],
     flanges: [["Диаметр нижнего фланца", derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], ["Диаметр верхнего фланца", derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], ["Полная высота детали", derived.bounds.max[2] - derived.bounds.min[2]]],
-    web: [[`Промежуток между втулкой и ${derived.pitchRadius === null ? "ободом" : "венцом"}`, anchors.radii.rimInner - anchors.radii.hub], ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
+    web: [[model.normalized.web.type === "spokes" ? "Толщина спиц" : "Толщина полотна", derived.webThickness],
+      [`Промежуток между втулкой и ${derived.pitchRadius === null ? "ободом" : "венцом"}`, anchors.radii.rimInner - anchors.radii.hub],
+      ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
     hub: [["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius], ["Втулка по высоте, от", derived.hubLowerZ], ["до", derived.hubUpperZ]],
     bore: boreRows(model),
     generation: []
@@ -559,6 +563,9 @@ el.form.addEventListener("change", (event) => {
     focusField(path);
   } else if (input.type === "radio" && path === "/bore/shape") {
     update(setBoreShape(state, input.value), { rebuildForm: true });
+    focusField(path);
+  } else if (input.type === "radio" && path) {
+    update(setValue(state, path, input.value), { rebuildForm: true });
     focusField(path);
   }
 });

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "kind": "timingPulley",
   "units": "mm",
   "rim": {
@@ -17,13 +17,14 @@
   },
   "web": {
     "type": "solid",
-    "axialThickness": 3,
-    "axialOffset": 1
+    "thinning": 6,
+    "alignment": "lower",
+    "axialOffset": 0
   },
   "hub": {
     "outerDiameter": 8,
     "lowerExtension": 0,
-    "upperExtension": 2
+    "upperExtension": 1
   },
   "bore": { "shape": "round", "diameter": 4 },
   "generation": {
