@@ -268,15 +268,17 @@ function computedMarkup() {
   if (!model) return "";
   const { derived, anchors } = model;
   const previous = result.normalized ? "" : ' <span class="tag">для прежних параметров</span>';
+  // without a web the rim reaches the hub, its inner diameter is the hub one
+  const rimInner = model.normalized.web.type === "none" ? null : 2 * derived.rimInnerRadius;
   const rows = {
     rim: {
-      idlerPulley: [["Внутренний диаметр обода", 2 * derived.rimInnerRadius]],
+      idlerPulley: [["Внутренний диаметр обода", rimInner]],
       spurGear: [["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр вершин", 2 * derived.outsideRadius], ["Диаметр впадин", 2 * derived.rootRadius],
-        ["Основной диаметр", 2 * derived.baseRadius], ["Шаг по делительной окружности", derived.pitch], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]],
-      timingPulley: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]]
+        ["Основной диаметр", 2 * derived.baseRadius], ["Шаг по делительной окружности", derived.pitch], ["Внутренний диаметр венца", rimInner]],
+      timingPulley: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", rimInner]]
     }[model.normalized.kind],
     flanges: [["Диаметр нижнего фланца", derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], ["Диаметр верхнего фланца", derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], ["Полная высота детали", derived.bounds.max[2] - derived.bounds.min[2]]],
-    web: [[model.normalized.web.type === "spokes" ? "Толщина спиц" : "Толщина полотна", derived.webThickness],
+    web: model.normalized.web.type === "none" ? [] : [[model.normalized.web.type === "spokes" ? "Толщина спиц" : "Толщина полотна", derived.webThickness],
       [`Промежуток между втулкой и ${derived.pitchRadius === null ? "ободом" : "венцом"}`, anchors.radii.rimInner - anchors.radii.hub],
       ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
     hub: [["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius], ["Втулка по высоте, от", derived.hubLowerZ], ["до", derived.hubUpperZ]],

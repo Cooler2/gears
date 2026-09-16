@@ -35,7 +35,8 @@ const WEB_VARIANTS = {
   solidShifted: { type: "solid", thinning: 6, alignment: "lower", axialOffset: 0.8 },
   spokesCentered: { ...SPOKES, thinning: 5, alignment: "center", axialOffset: 0 },
   spokesAtUpper: { ...SPOKES, thinning: 5, alignment: "upper", axialOffset: 0 },
-  spokesFull: { ...SPOKES, thinning: 0, alignment: "center", axialOffset: 0 }
+  spokesFull: { ...SPOKES, thinning: 0, alignment: "center", axialOffset: 0 },
+  none: { type: "none" }
 };
 const HUB_VARIANTS = [[0, 0], [2, 0], [0, 3], [2, 3]];
 // sizes for a 12 mm hub; each shape reaches close to the 1 mm wall limit somewhere
@@ -66,7 +67,7 @@ test("every kind, flange, web and hub-extension combination builds one closed so
         assert.equal(result.verification.connectedComponents, 1, label);
         assertNoDuplicateVertices(result.mesh, label);
         assertExpectedBounds(input, result, label);
-        if (web.type === "solid") {
+        if (web.type !== "spokes") {
           const expected = expectedSolidWebVolume(input, result.derived);
           assert.ok(Math.abs(result.verification.signedVolume - expected) < 1e-9 * expected, `${label}: volume`);
         }
@@ -336,8 +337,11 @@ function expectedSolidWebVolume(input, derived) {
   const error = input.generation.maxChordError;
   const surface = rimSurface(input.kind, input.rim, { outside: derived.outsideRadius }, error);
   const circleArea = (radius, marks = []) => polygonArea(buildMarkedCircle(radius, circleSegmentCount(radius, error), marks).points);
-  const rimInner = circleArea(derived.rimInnerRadius, surface.marks);
-  const hub = circleArea(derived.hubRadius, buildBoreContour(input.bore, error).corners);
+  const corners = buildBoreContour(input.bore, error).corners;
+  // without a web the rim reaches the hub, and the hub loop carries the rim marks too
+  const noWeb = input.web.type === "none";
+  const hub = circleArea(derived.hubRadius, noWeb ? [...corners, ...surface.marks] : corners);
+  const rimInner = noWeb ? hub : circleArea(derived.rimInnerRadius, surface.marks);
   let volume = (polygonArea(surface.points) - rimInner) * input.rim.width;
   const bore = polygonArea(buildBoreContour(input.bore, error).points);
   volume += (hub - bore) * (derived.hubUpperZ - derived.hubLowerZ);

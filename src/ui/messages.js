@@ -20,7 +20,12 @@ const TEXTS = {
     `Размер по лыске должен быть больше половины диаметра (${n(minimum)} мм) и меньше диаметра (${n(maximum)} мм): иначе лыска срезает ось или не касается отверстия.`,
   E_BORE_KEY: ({ maximum }) =>
     `Паз должен быть уже отверстия: ширина паза — меньше ${n(maximum)} мм.`,
-  E_RADIAL_ORDER: ({ span, minimum, maxHubDiameter }, smooth) => {
+  E_RADIAL_ORDER: ({ span, minimum, maxHubDiameter }, smooth, paths) => {
+    // without a web the rim thickness is not involved: the hub has to stay under the tooth roots
+    if (!paths.includes("/rim/radialThickness")) {
+      return `Втулка почти достаёт до ${smooth ? "поверхности обода" : "впадин зубьев"}: между ними ${n(span)} мм, нужно не меньше ${n(minimum)} мм. ` +
+        (maxHubDiameter > 0 ? `Диаметр втулки — не больше ${n(maxHubDiameter)} мм.` : `Возьмите ${smooth ? "больше диаметр обода" : "больше зубьев"}.`);
+    }
     const rim = smooth ? ["ободом", "больше диаметр обода", "тоньше обод"] : ["венцом", "больше зубьев", "тоньше венец"];
     return `Между втулкой и ${rim[0]} ${n(span)} мм, нужно не меньше ${n(minimum)} мм. ` +
       (maxHubDiameter > 0
@@ -67,7 +72,7 @@ export function diagnosticText(diagnostic, description) {
   const text = TEXTS[diagnostic.code];
   // the paths tell a smooth rim, which is sized by its diameter, from a toothed one; the description tells it for the rest
   const smooth = diagnostic.paths.includes("/rim/outerDiameter") || description?.kind === "idlerPulley";
-  return text ? text(diagnostic.details ?? {}, smooth) : diagnostic.code;
+  return text ? text(diagnostic.details ?? {}, smooth, diagnostic.paths) : diagnostic.code;
 }
 
 /** Warnings of phase "print" are advice, everything else with severity error blocks building. */

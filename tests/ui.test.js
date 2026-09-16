@@ -157,6 +157,14 @@ test("defaults validate and the form state keeps hidden values", () => {
   assert.equal(validateDescription(solid.description).ok, true, "a solid web carries no spoke fields");
   assert.equal(setWebType(solid, "spokes").description.web.width, 4);
 
+  // no web drops the placement too, and a web coming back gets it again
+  const placed = setValue(spokes, "/web/thinning", 3);
+  const none = setWebType(placed, "none");
+  assert.deepEqual(none.description.web, { type: "none" });
+  assert.equal(validateDescription(none.description).ok, true);
+  assert.deepEqual(setWebType(none, "spokes").description.web, placed.description.web);
+  assert.equal(setWebType(none, "solid").description.web.thinning, 3);
+
   const flanged = setValue(setFlange(state, "upper", true), "/flanges/upper/axialThickness", 2.5);
   const bare = setFlange(flanged, "upper", false);
   assert.equal(bare.description.flanges.upper, null);

@@ -9,6 +9,7 @@ const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
 const SOLID_WEB_FIELDS = ["type", "thinning", "alignment", "axialOffset"];
 const WEB_ALIGNMENTS = ["lower", "center", "upper"];
 const SPOKE_WEB_FIELDS = [...SOLID_WEB_FIELDS, "count", "width", "filletRadius"];
+const NO_WEB_FIELDS = ["type"]; // the rim sits on the hub: a pinion, a small pulley on a shaft
 const HUB_FIELDS = ["outerDiameter", "lowerExtension", "upperExtension"];
 const BORE_FIELDS = {
   round: ["shape", "diameter"],
@@ -173,12 +174,14 @@ function validateStatic(input, diagnostics) {
     }
   }
   if (isRecord(input.web)) {
-    const fields = input.web.type === "spokes" ? SPOKE_WEB_FIELDS : SOLID_WEB_FIELDS;
+    const fields = { spokes: SPOKE_WEB_FIELDS, none: NO_WEB_FIELDS }[input.web.type] ?? SOLID_WEB_FIELDS;
     if (exactObject(input.web, fields, "/web", diagnostics)) {
-      enumeration(input.web.type, ["solid", "spokes"], "/web/type", diagnostics);
-      numberRange(input.web.thinning, 0, 59, "/web/thinning", diagnostics);
-      enumeration(input.web.alignment, WEB_ALIGNMENTS, "/web/alignment", diagnostics);
-      numberRange(input.web.axialOffset, -60, 60, "/web/axialOffset", diagnostics);
+      enumeration(input.web.type, ["solid", "spokes", "none"], "/web/type", diagnostics);
+      if (input.web.type !== "none") {
+        numberRange(input.web.thinning, 0, 59, "/web/thinning", diagnostics);
+        enumeration(input.web.alignment, WEB_ALIGNMENTS, "/web/alignment", diagnostics);
+        numberRange(input.web.axialOffset, -60, 60, "/web/axialOffset", diagnostics);
+      }
       if (input.web.type === "spokes") {
         integerRange(input.web.count, 3, 12, "/web/count", diagnostics);
         numberRange(input.web.width, 1, 20, "/web/width", diagnostics);
@@ -220,8 +223,10 @@ function validateFlange(value, path, diagnostics) {
 
 // details carry the compared quantities in mm so a form can explain the conflict
 function validateRelations(input, derived, diagnostics) {
-  const span = derived.rimInnerRadius - derived.hubRadius;
-  if (derived.rimInnerRadius <= 0) {
+  const noWeb = input.web.type === "none";
+  // without a web the rim material reaches the hub, so the hub has to stay inside the tooth roots
+  const span = (noWeb ? derived.rootRadius : derived.rimInnerRadius) - derived.hubRadius;
+  if (!noWeb && derived.rimInnerRadius <= 0) {
     diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", [rimSizePath(input.kind), "/rim/radialThickness"],
       { rimInnerRadius: derived.rimInnerRadius }));
   }
@@ -249,8 +254,9 @@ function validateRelations(input, derived, diagnostics) {
       { wall: derived.hubRadius - derived.boreOuterRadius, minimum: 1 }));
   }
   if (span < minimumWebSpan(input.web.type)) {
-    diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", rimSizePath(input.kind)],
-      { span, minimum: minimumWebSpan(input.web.type), maxHubDiameter: 2 * (derived.rimInnerRadius - minimumWebSpan(input.web.type)) }));
+    const paths = noWeb ? ["/hub/outerDiameter", rimSizePath(input.kind)] : ["/hub/outerDiameter", "/rim/radialThickness", rimSizePath(input.kind)];
+    diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", paths,
+      { span, minimum: minimumWebSpan(input.web.type), maxHubDiameter: 2 * (derived.hubRadius + span - minimumWebSpan(input.web.type)) }));
   }
   const { faceLowerZ, faceUpperZ, webLowerZ, webUpperZ, hubLowerZ, hubUpperZ } = derived;
   if (derived.webThickness < MIN_WEB_THICKNESS) {
@@ -296,14 +302,15 @@ function borePaths(bore) {
 }
 
 // a solid web is plain material, so it only has to keep the hub and rim polygons apart
-// (0.5 is twice the largest maxChordError); spokes need room for two fillets
+// (0.5 is twice the largest maxChordError), as does a hub under the tooth roots without a web;
+// spokes need room for two fillets
 function minimumWebSpan(webType) {
   return webType === "spokes" ? 1 : 0.5;
 }
 
 function addWarnings(input, derived, diagnostics) {
   const hubWall = derived.hubRadius - derived.boreOuterRadius;
-  if (input.rim.radialThickness < THIN_FEATURE) diagnostics.push(thin("/rim/radialThickness", input.rim.radialThickness));
+  if (input.web.type !== "none" && input.rim.radialThickness < THIN_FEATURE) diagnostics.push(thin("/rim/radialThickness", input.rim.radialThickness));
   if (derived.webThickness < THIN_FEATURE) diagnostics.push(thin("/web/thinning", derived.webThickness));
   if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
   if (hubWall < THIN_FEATURE) diagnostics.push(thin("/hub/outerDiameter", hubWall));
@@ -327,15 +334,18 @@ function derive(input) {
   const radii = rimRadii(input.kind, input.rim);
   const toothed = input.kind !== "idlerPulley";
   const outsideRadius = radii.outside;
-  const rimInnerRadius = radii.root - input.rim.radialThickness;
+  const noWeb = input.web.type === "none";
+  const hubRadius = input.hub.outerDiameter / 2;
+  // without a web the rim body goes down to the hub, and radialThickness is not used
+  const rimInnerRadius = noWeb ? hubRadius : radii.root - input.rim.radialThickness;
   const boreRadius = input.bore.diameter / 2;
   const bore = boreExtents(input.bore);
-  const hubRadius = input.hub.outerDiameter / 2;
   const halfWidth = input.rim.width / 2;
   // faces of the part: flange far faces, or rim ends without flanges
   const faceLowerZ = input.flanges.lower ? -halfWidth - input.flanges.lower.axialThickness : -halfWidth;
   const faceUpperZ = input.flanges.upper ? halfWidth + input.flanges.upper.axialThickness : halfWidth;
-  const { thinning, alignment, axialOffset } = input.web;
+  // no web means the rim and the hub are one body over the whole height, as a web without thinning
+  const { thinning, alignment, axialOffset } = noWeb ? { thinning: 0, alignment: "lower", axialOffset: 0 } : input.web;
   const webThickness = faceUpperZ - faceLowerZ - thinning;
   // each web plane is counted from its own face, so a web without thinning or shift
   // lies exactly on the faces; the mesh shares vertices only between equal levels
@@ -389,7 +399,7 @@ function normalize(input) {
     axialThickness: value.axialThickness,
     radialExtension: value.radialExtension
   };
-  const web = {
+  const web = input.web.type === "none" ? { type: "none" } : {
     type: input.web.type,
     thinning: input.web.thinning,
     alignment: input.web.alignment,

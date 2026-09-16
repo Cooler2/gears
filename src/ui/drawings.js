@@ -467,37 +467,40 @@ export function renderSection(model, ctx) {
     }));
   }
 
-  // web thinning and shift inside the span between hub and rim, left half;
-  // labels are led out past the rim, into the column the hub dimensions use
-  const span = Math.max(rimInner - r.hub, 0);
-  const thinningX = -(r.hub + 0.68 * span);
-  const offsetX = -(r.hub + 0.3 * span);
-  const labelX = -(outer + 0.8 * u);
-  // the thinning is the room left above and below the web, up to the faces of the part
-  const gaps = [[z.webUpper, faceUpper], [faceLower, z.webLower]].filter(([z0, z1]) => z1 - z0 > 1e-9);
-  const widest = gaps.reduce((best, gap) => !best || gap[1] - gap[0] > best[1] - best[0] ? gap : best, null);
-  const thinningPoint = widest ? [thinningX, (widest[0] + widest[1]) / 2] : [thinningX, z.webUpper];
-  const thinningY = thinningPoint[1] + u;
-  const faceLines = gaps.flatMap((gap) => gap).filter((level) => level === faceUpper || level === faceLower)
-    .map((level) => `<path class="mid-plane" d="M${P([-rimInner, level])}L${P([thinningX - 0.4 * u, level])}"/>`).join("");
-  const gapLines = gaps.slice(1).map(([z0, z1]) => dimensionLine([thinningX, z0], [thinningX, z1], u)).join("");
-  const thinningValue = gaps.length > 1 ? gaps.map(([z0, z1]) => formatNumber(z1 - z0)).join(" + ") : web.thinning;
-  out.push(dimension(ctx, "/web/thinning", {
-    u, a: [thinningX, gaps[0]?.[0] ?? z.webUpper], b: [thinningX, gaps[0]?.[1] ?? z.webUpper], value: thinningValue,
-    extra: faceLines + gapLines,
-    label: [labelX - 0.2 * u, thinningY], anchor: "end",
-    leader: [thinningPoint, [labelX, thinningY]]
-  }));
-  // the shift from the aligned position: from a face to the web, or between the middles, dashed
-  const offsetFrom = { lower: [faceLower, z.webLower], upper: [faceUpper, z.webUpper], center: [(faceLower + faceUpper) / 2, (z.webLower + z.webUpper) / 2] }[web.alignment];
-  const offsetY = Math.min(bottom - 0.6 * u, thinningY - 1.8 * u);
-  const middles = web.alignment === "center" ? offsetFrom.map((level) => `<path class="mid-plane" d="M${P([-rimInner, level])}L${P([-r.hub, level])}"/>`).join("") : "";
-  out.push(dimension(ctx, "/web/axialOffset", {
-    u, a: [offsetX, offsetFrom[0]], b: [offsetX, offsetFrom[1]], value: web.axialOffset,
-    extra: middles,
-    leader: [[offsetX, (offsetFrom[0] + offsetFrom[1]) / 2], [labelX, offsetY]],
-    label: [labelX - 0.2 * u, offsetY], anchor: "end"
-  }));
+  // web thinning and shift; without a web there is nothing to place
+  if (web.type !== "none") {
+    // inside the span between hub and rim, left half;
+    // labels are led out past the rim, into the column the hub dimensions use
+    const span = Math.max(rimInner - r.hub, 0);
+    const thinningX = -(r.hub + 0.68 * span);
+    const offsetX = -(r.hub + 0.3 * span);
+    const labelX = -(outer + 0.8 * u);
+    // the thinning is the room left above and below the web, up to the faces of the part
+    const gaps = [[z.webUpper, faceUpper], [faceLower, z.webLower]].filter(([z0, z1]) => z1 - z0 > 1e-9);
+    const widest = gaps.reduce((best, gap) => !best || gap[1] - gap[0] > best[1] - best[0] ? gap : best, null);
+    const thinningPoint = widest ? [thinningX, (widest[0] + widest[1]) / 2] : [thinningX, z.webUpper];
+    const thinningY = thinningPoint[1] + u;
+    const faceLines = gaps.flatMap((gap) => gap).filter((level) => level === faceUpper || level === faceLower)
+      .map((level) => `<path class="mid-plane" d="M${P([-rimInner, level])}L${P([thinningX - 0.4 * u, level])}"/>`).join("");
+    const gapLines = gaps.slice(1).map(([z0, z1]) => dimensionLine([thinningX, z0], [thinningX, z1], u)).join("");
+    const thinningValue = gaps.length > 1 ? gaps.map(([z0, z1]) => formatNumber(z1 - z0)).join(" + ") : web.thinning;
+    out.push(dimension(ctx, "/web/thinning", {
+      u, a: [thinningX, gaps[0]?.[0] ?? z.webUpper], b: [thinningX, gaps[0]?.[1] ?? z.webUpper], value: thinningValue,
+      extra: faceLines + gapLines,
+      label: [labelX - 0.2 * u, thinningY], anchor: "end",
+      leader: [thinningPoint, [labelX, thinningY]]
+    }));
+    // the shift from the aligned position: from a face to the web, or between the middles, dashed
+    const offsetFrom = { lower: [faceLower, z.webLower], upper: [faceUpper, z.webUpper], center: [(faceLower + faceUpper) / 2, (z.webLower + z.webUpper) / 2] }[web.alignment];
+    const offsetY = Math.min(bottom - 0.6 * u, thinningY - 1.8 * u);
+    const middles = web.alignment === "center" ? offsetFrom.map((level) => `<path class="mid-plane" d="M${P([-rimInner, level])}L${P([-r.hub, level])}"/>`).join("") : "";
+    out.push(dimension(ctx, "/web/axialOffset", {
+      u, a: [offsetX, offsetFrom[0]], b: [offsetX, offsetFrom[1]], value: web.axialOffset,
+      extra: middles,
+      leader: [[offsetX, (offsetFrom[0] + offsetFrom[1]) / 2], [labelX, offsetY]],
+      label: [labelX - 0.2 * u, offsetY], anchor: "end"
+    }));
+  }
 
   const width = 2 * outer + 6.5 * u + 7 * u;
   const box = [-outer - 7 * u, -(top + 4.2 * u), width, top - bottom + 7.6 * u];

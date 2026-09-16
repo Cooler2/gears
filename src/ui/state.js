@@ -43,6 +43,7 @@ export function createState(schema, kind) {
     description: defaultDescription(schema, kind),
     remembered: {
       spokes: { count: value("spokeWeb", "count"), width: value("spokeWeb", "width"), filletRadius: value("spokeWeb", "filletRadius") },
+      placement: Object.fromEntries(WEB_PLACEMENT.map((field) => [field, value("webPlacement", field)])),
       flanges: { lower: flange(), upper: flange() },
       bore: Object.fromEntries(Object.values(BORE_EXTRAS).flat().map((field) => [field, value("borePlacement", field)]))
     }
@@ -65,13 +66,11 @@ export function setWebType(state, type) {
   const { web } = state.description;
   if (web.type === type) return state;
   const next = structuredClone(state);
-  const placement = Object.fromEntries(WEB_PLACEMENT.map((field) => [field, web[field]]));
-  if (type === "solid") {
-    next.remembered.spokes = { count: web.count, width: web.width, filletRadius: web.filletRadius };
-    next.description.web = { type, ...placement };
-  } else {
-    next.description.web = { type, ...placement, ...state.remembered.spokes };
-  }
+  // a web without placement (none) takes the remembered one back
+  const placement = web.type === "none" ? state.remembered.placement : Object.fromEntries(WEB_PLACEMENT.map((field) => [field, web[field]]));
+  if (web.type !== "none") next.remembered.placement = placement;
+  if (web.type === "spokes") next.remembered.spokes = { count: web.count, width: web.width, filletRadius: web.filletRadius };
+  next.description.web = { none: { type }, solid: { type, ...placement }, spokes: { type, ...placement, ...next.remembered.spokes } }[type];
   return next;
 }
 
@@ -104,6 +103,7 @@ export function loadDescription(state, description) {
   const { web, flanges, bore } = description;
   for (const field of BORE_EXTRAS[bore.shape] ?? []) next.remembered.bore[field] = bore[field];
   if (web.type === "spokes") next.remembered.spokes = { count: web.count, width: web.width, filletRadius: web.filletRadius };
+  if (web.type !== "none") next.remembered.placement = Object.fromEntries(WEB_PLACEMENT.map((field) => [field, web[field]]));
   for (const side of ["lower", "upper"]) {
     if (flanges[side]) next.remembered.flanges[side] = structuredClone(flanges[side]);
   }

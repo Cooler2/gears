@@ -373,6 +373,26 @@ test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
   assert.ok(codes(spokes).includes("E_RADIAL_ORDER"));
 });
 
+test("without a web the rim thickness is free and the hub stays 0.5 mm under the tooth roots", async () => {
+  const pinion = await readJson("../examples/valid/gear-pinion-12t.json");
+  const { derived } = validateDescription(pinion);
+  assert.equal(derived.rimInnerRadius, derived.hubRadius, "the rim reaches the hub");
+  assert.deepEqual([derived.webLowerZ, derived.webUpperZ], [derived.faceLowerZ, derived.faceUpperZ]);
+  const diagnostics = (input) => validateDescription(input).diagnostics;
+  // a rim thickness that leaves no room for a web does not matter
+  pinion.rim.radialThickness = 25;
+  assert.deepEqual(diagnostics(pinion).filter(({ severity }) => severity === "error"), []);
+  pinion.hub.outerDiameter = 2 * (derived.rootRadius - 0.5);
+  assert.ok(!diagnostics(pinion).some(({ code }) => code === "E_RADIAL_ORDER"));
+  pinion.hub.outerDiameter = 2 * (derived.rootRadius - 0.45);
+  const radialOrder = diagnostics(pinion).find(({ code }) => code === "E_RADIAL_ORDER");
+  assert.deepEqual(radialOrder.paths, ["/hub/outerDiameter", "/rim/toothCount"]);
+  assert.ok(Math.abs(radialOrder.details.maxHubDiameter - 2 * (derived.rootRadius - 0.5)) < 1e-12);
+  // placement fields belong to a web
+  const placed = { ...structuredClone(pinion), web: { type: "none", thinning: 0 } };
+  assert.ok(diagnostics(placed).some(({ paths }) => paths.includes("/web/thinning")));
+});
+
 test("validation is finite, strict, and does not mutate its input", async () => {
   const input = await readJson("../examples/valid/solid-basic.json");
   const snapshot = structuredClone(input);
@@ -515,7 +535,7 @@ test("examples lie flat on their lower face, and a solid one covers it completel
       const [a, b, c] = points;
       area -= ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2; // facing −Z
     }
-    if (input.web.type !== "solid") {
+    if (input.web.type === "spokes") {
       assert.ok(area > 0, `${name}: spokes and hub at the bottom`);
       continue;
     }

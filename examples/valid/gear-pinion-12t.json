@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 4,
+  "kind": "spurGear",
+  "units": "mm",
+  "rim": {
+    "module": 1,
+    "toothCount": 12,
+    "pressureAngle": 20,
+    "profileShift": 0.3,
+    "backlash": 0.1,
+    "width": 8,
+    "radialThickness": 2
+  },
+  "flanges": {
+    "lower": null,
+    "upper": null
+  },
+  "web": {
+    "type": "none"
+  },
+  "hub": {
+    "outerDiameter": 8,
+    "lowerExtension": 0,
+    "upperExtension": 0
+  },
+  "bore": { "shape": "dFlat", "diameter": 5.2, "flatDistance": 4.7 },
+  "generation": {
+    "maxChordError": 0.02
+  }
+}

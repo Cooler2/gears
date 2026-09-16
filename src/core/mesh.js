@@ -20,7 +20,7 @@ const MAX_TRIANGLES = 200000;
  * the windows, whose walls are built from the same loop vertices.
  */
 export function buildPulleyMesh(description, derived) {
-  const { rim, flanges, web } = description;
+  const { rim, flanges, web } = description; // web.type "none": the web levels are the faces, see derive
   const { hubRadius, rimInnerRadius, outsideRadius, webLowerZ, webUpperZ, hubLowerZ, hubUpperZ } = derived;
   const maxChordError = description.generation.maxChordError;
   const rimLowerZ = -rim.width / 2;
@@ -58,10 +58,13 @@ export function buildPulleyMesh(description, derived) {
 
   const circle = (radius, marks) => buildMarkedCircle(radius, circleSegmentCount(radius, maxChordError), marks);
   const flangeEdge = (flange) => flange ? circle(outsideRadius + flange.radialExtension, surface.marks) : null;
+  // without a web the rim ends and the flanges start right at the hub: one loop serves as both
+  const noWeb = web.type === "none";
+  const hub = circle(hubRadius, noWeb ? [...hubBoreMarks, ...surface.marks] : hubBoreMarks);
   const contours = {
     bore,
-    hub: circle(hubRadius, hubBoreMarks),
-    rimInner: circle(rimInnerRadius, [...surface.marks, ...rimSpokeMarks]),
+    hub,
+    rimInner: noWeb ? hub : circle(rimInnerRadius, [...surface.marks, ...rimSpokeMarks]),
     profile: { points: surface.points },
     lowerFlange: flangeEdge(flanges.lower),
     upperFlange: flangeEdge(flanges.upper)
@@ -84,7 +87,7 @@ export function buildPulleyMesh(description, derived) {
   addFlange("lower");
   addFlange("upper");
   if (layout) addSpokes();
-  else addSolidWeb();
+  else if (!noWeb) addSolidWeb();
 
   if (mesh.triangleCount > MAX_TRIANGLES) return complexityFailure();
   const { vertices, indices } = mesh.finish();

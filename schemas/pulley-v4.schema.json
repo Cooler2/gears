@@ -42,7 +42,8 @@
     "web": {
       "oneOf": [
         { "$ref": "#/$defs/solidWeb" },
-        { "$ref": "#/$defs/spokeWeb" }
+        { "$ref": "#/$defs/spokeWeb" },
+        { "$ref": "#/$defs/noWeb" }
       ]
     },
     "hub": {
@@ -257,6 +258,17 @@
         "thinning": { "$ref": "#/$defs/webPlacement/properties/thinning" },
         "alignment": { "$ref": "#/$defs/webPlacement/properties/alignment" },
         "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" }
+      }
+    },
+    "noWeb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "const": "none",
+          "description": "No web: the rim material goes down to the hub over the whole height of the part, as on a pinion. rim.radialThickness is kept but not used; the hub has to stay at least 0.5 mm inside the tooth roots or the smooth surface."
+        }
       }
     },
     "spokeWeb": {

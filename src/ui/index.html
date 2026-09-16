@@ -8,14 +8,14 @@
   <script type="module" src="app.js"></script>
 </head>
 <body>
+  <!-- one row: the section tabs on the left, the file actions on the right -->
   <header class="top">
-    <div class="brand">
-      <h1 id="part-title">Шкив GT2</h1>
-      <span class="badge-exp" id="profile-badge" title="Шаг и наружный диаметр сверены с каталогом, форма канавки подтверждается только пробной печатью">экспериментальный профиль зубьев</span>
-    </div>
+    <h1 id="part-title" class="visually-hidden">Шкив GT2</h1>
+    <nav id="groups" class="groups" aria-label="Разделы параметров"></nav>
     <div class="actions">
-      <button type="button" id="open">Открыть JSON</button>
-      <button type="button" id="save">Сохранить JSON</button>
+      <span class="badge-exp" id="profile-badge" title="Экспериментальный профиль зубьев: шаг и наружный диаметр сверены с каталогом, форма канавки подтверждается только пробной печатью">эксп. профиль</span>
+      <button type="button" id="open" title="Открыть описание детали из JSON-файла">Открыть</button>
+      <button type="button" id="save" title="Сохранить описание детали в JSON-файл">Сохранить</button>
       <button type="button" id="download-stl" class="primary" aria-disabled="true" aria-describedby="preview-state">Скачать STL</button>
       <button type="button" id="reset" class="quiet">Сбросить</button>
       <input type="file" id="file-input" accept=".json,application/json" hidden>
@@ -23,7 +23,6 @@
   </header>
   <p id="boot" class="notice">Загрузка… Если страница так и не заработала, её открыли без локального сервера: браузеры не загружают модули с file://. Запустите <code>npm run ui</code> и откройте http://127.0.0.1:8080/.</p>
   <p id="notice" class="notice" role="status" hidden></p>
-  <nav id="groups" class="groups" aria-label="Разделы параметров"></nav>
   <main class="layout">
     <div class="side">
       <section class="form-panel" aria-labelledby="group-title">

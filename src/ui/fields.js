@@ -47,6 +47,7 @@ export function groupTitle(group, description) {
 }
 
 const isSpokes = (description) => description.web?.type === "spokes";
+const hasWeb = (description) => description.web?.type !== "none";
 const hasBore = (...shapes) => (description) => shapes.includes(description.bore?.shape);
 const hasFlange = (side) => (description) => Boolean(description.flanges?.[side]);
 
@@ -98,7 +99,7 @@ export const FIELDS = [
       : "Обычно на 0,5–1 мм шире ремня. Фланцы и выступы втулки в неё не входят."
   },
   {
-    path: "/rim/radialThickness", group: "rim", schema: ["rimPlacement", "radialThickness"],
+    path: "/rim/radialThickness", group: "rim", schema: ["rimPlacement", "radialThickness"], applies: hasWeb,
     label: (description) => `Толщина ${rimWords(description).bodyOf}`, symbol: "T_r", unit: "мм",
     hint: (description) => isIdler(description)
       ? "Кольцо материала под поверхностью обода, внутрь до полотна или спиц."
@@ -138,24 +139,24 @@ export const FIELDS = [
   {
     path: "/web/type", group: "web", kind: "choice",
     label: (description) => `Соединение ${rimWords(description).bodyOf} и втулки`,
-    options: [{ value: "solid", label: "Сплошное полотно" }, { value: "spokes", label: "Спицы" }],
-    hint: "Сплошной диск или прямые спицы со скруглениями."
+    options: [{ value: "solid", label: "Сплошное" }, { value: "spokes", label: "Спицы" }, { value: "none", label: "Без полотна" }],
+    hint: (description) => `Сплошной диск, прямые спицы со скруглениями или ничего: без полотна ${isIdler(description) ? "обод" : isGear(description) ? "зубья идут" : "зубчатая часть идёт"} прямо от втулки, как у маленькой шестерни на валу.`
   },
   {
-    path: "/web/thinning", group: "web", schema: ["webPlacement", "thinning"],
+    path: "/web/thinning", group: "web", schema: ["webPlacement", "thinning"], applies: hasWeb,
     label: (description) => isSpokes(description) ? "Утонение спиц" : "Утонение полотна", symbol: "t_w", unit: "мм",
     hint: (description) => isGear(description)
       ? "На сколько полотно тоньше венца. Ноль — сплошное тело во всю ширину."
       : "На сколько полотно тоньше детали вместе с фланцами. Ноль — полотно во всю высоту, заподлицо с фланцами."
   },
   {
-    path: "/web/alignment", group: "web", kind: "choice",
+    path: "/web/alignment", group: "web", kind: "choice", applies: hasWeb,
     label: (description) => isSpokes(description) ? "Спицы прижаты" : "Полотно прижато",
     options: [{ value: "lower", label: "К низу" }, { value: "center", label: "По центру" }, { value: "upper", label: "К верху" }],
     hint: "К низу — плоское основание для печати: полотно лежит в одной плоскости с нижним фланцем или торцом и втулкой."
   },
   {
-    path: "/web/axialOffset", group: "web", schema: ["webPlacement", "axialOffset"],
+    path: "/web/axialOffset", group: "web", schema: ["webPlacement", "axialOffset"], applies: hasWeb,
     label: (description) => isSpokes(description) ? "Сдвиг спиц" : "Сдвиг полотна", symbol: "Δz", unit: "мм",
     hint: "От выбранного положения, плюс — вверх. Обычно ноль; полотно не может выходить за низ и верх детали."
   },
