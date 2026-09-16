@@ -2,7 +2,7 @@
 // Static file server for the local form: the page loads ES modules, the schema and
 // the examples, which browsers refuse to do from file://. Serves the project root.
 //
-//   node tools/serve.js [port]      then open http://localhost:<port>/src/ui/
+//   node tools/serve.js [port]      then open http://127.0.0.1:<port>/src/ui/
 
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -44,4 +44,4 @@ createServer(async (request, response) => {
     response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
     response.end("not found");
   }
-}).listen(port, "127.0.0.1", () => console.log(`http://localhost:${port}/src/ui/`));
+}).listen(port, "127.0.0.1", () => console.log(`http://127.0.0.1:${port}/src/ui/`)); // not localhost: it may resolve to ::1, served by someone else

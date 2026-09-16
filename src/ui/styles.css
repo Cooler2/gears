@@ -149,6 +149,21 @@ button {
 
 .notice-error { background: var(--error-soft); color: var(--error); }
 
+/* short-lived messages float over the page instead of shifting it */
+#notice {
+  position: fixed;
+  z-index: 10;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
 /* groups */
 
 .groups {
@@ -201,27 +216,30 @@ button {
 .layout {
   display: grid;
   grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
-  grid-template-rows: auto 1fr;
-  grid-template-areas: "form drawings" "preview drawings";
+  grid-template-areas: "side drawings";
   gap: 20px;
-  padding: 20px 24px 32px;
+  padding: 20px 24px;
   align-items: start;
 }
 
+.side { grid-area: side; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .form-panel { grid-area: form; }
 .drawings { grid-area: drawings; }
 .preview { grid-area: preview; position: sticky; top: 12px; }
 
-@media (min-width: 1500px) {
+/* a third column only when the window is also tall: in a low one the drawings
+   need the width, side by side, more than the preview needs to stay in sight */
+@media (min-width: 1500px) and (min-height: 860px) {
   .layout {
     grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) minmax(360px, 0.8fr);
-    grid-template-rows: auto;
     grid-template-areas: "form drawings preview";
   }
+  .side { display: contents; }
 }
 
 @media (max-width: 860px) {
   .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "form" "drawings" "preview"; padding: 16px; }
+  .side { display: contents; }
   .preview { position: static; }
   .top, .groups { padding-left: 16px; padding-right: 16px; }
 }
@@ -658,3 +676,37 @@ figcaption {
 .chord-arc { stroke: var(--accent); stroke-width: 2px; fill: none; }
 .chord-line { stroke: var(--ink); stroke-width: 2px; fill: none; }
 .note { fill: var(--muted); font-size: 0.8em; }
+
+/* A window tall enough holds the whole page: the columns scroll by themselves and the
+   drawings shrink to the height left, so every size of the group stays in sight.
+   Last in the file, as it overrides the spacing above. */
+@media (min-width: 861px) and (min-height: 600px) {
+  body { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+  .layout { flex: 1 1 0; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; padding-block: 16px; gap: 16px; }
+  .side, .drawings { min-height: 0; overflow-y: auto; }
+  .side { gap: 16px; }
+  .side > * { flex: none; } /* form and preview scroll as one column */
+  .preview { position: static; }
+
+  .drawings { display: flex; flex-direction: column; gap: 10px; padding-block: 14px; container-type: size; }
+  .drawings > * { flex: none; margin: 0; }
+  .drawings .status-list { margin-bottom: 0; }
+  .drawings figcaption { margin-bottom: 4px; }
+
+  /* Heights follow the drawings' heights in label units (--h, set by the page), so the
+     labels come out the same size. Below 9 px labels stop shrinking and the column scrolls. */
+  .drawings > .views { flex: 1 1 0; display: flex; flex-direction: column; gap: 10px; }
+  .views figure { display: flex; flex-direction: column; flex: var(--h, 1) 1 1.8em; min-height: calc(var(--h, 1) * 9px + 1.8em); margin: 0; }
+  .views .drawing { flex: 1 1 0; min-height: 0; }
+  .views .drawing svg { height: 100%; max-height: none; }
+
+  /* a wide, low column puts the two drawings side by side */
+  @container (min-aspect-ratio: 11 / 10) {
+    .drawings > .views { flex-direction: row; }
+    .views figure { flex: var(--w, 1) 1 0; min-width: 0; }
+  }
+}
+
+@media (min-width: 1500px) and (min-height: 860px) {
+  .form-panel, .preview { min-height: 0; overflow-y: auto; } /* three columns, each scrolls by itself */
+}

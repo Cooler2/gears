@@ -23,10 +23,11 @@ const STORAGE_KEY = "gears.pulley.form.v1";
 const SECTION_FIRST = new Set(["flanges", "hub"]);
 const MAX_FILE_BYTES = 1 << 20; // a description is well under a kilobyte
 const BUILD_TIMEOUT_MS = 20000;
+const CONTEXT_VIEW_SCALE = 0.6; // labels of a view with no sizes of its own, relative to the main one
 const PREVIEW_TAGS = { fresh: "по текущим параметрам", building: "строится…", invalid: "устарела", failed: "не построена", crashed: "сбой" };
 const $ = (selector) => document.querySelector(selector);
 const el = {
-  nav: $("#groups"), title: $("#group-title"), form: $("#form"), status: $("#status"),
+  nav: $("#groups"), title: $("#group-title"), form: $("#form"), status: $("#status"), drawings: $("#drawings"),
   plan: $("#plan"), section: $("#section"), sectionTag: $("#section-tag"), planTag: $("#plan-tag"),
   chordFigure: $("#chord-figure"), chord: $("#chord"), planFigure: $("#plan-figure"), sectionFigure: $("#section-figure"),
   stale: $("#stale"), file: $("#file-input"), notice: $("#notice"),
@@ -329,10 +330,52 @@ function renderDrawings() {
   else el.sectionFigure.before(el.planFigure);
   el.plan.innerHTML = renderPlan(model, ctx);
   el.section.innerHTML = renderSection(model, ctx);
+  cropToContent(el.plan.querySelector("svg"));
+  cropToContent(el.section.querySelector("svg"));
+  // a view whose sizes all appear on the other one is context: it gets less room
+  const [plan, section] = [el.planFigure, el.sectionFigure].map((figure) => new Set([...figure.querySelectorAll(".dim")].map((dim) => dim.dataset.path)));
+  const covered = (mine, other) => [...mine].every((path) => other.has(path));
+  setLabelSpan(el.planFigure, covered(plan, section) ? CONTEXT_VIEW_SCALE : 1);
+  setLabelSpan(el.sectionFigure, covered(section, plan) ? CONTEXT_VIEW_SCALE : 1);
   el.planTag.textContent = model.plan.spokes?.schematic ? "спицы схематично: скругления не помещаются" : "в масштабе";
   el.sectionTag.textContent = model.normalized.web.type === "spokes" ? "в масштабе, спицы — разрез по спице" : "в масштабе";
   el.chordFigure.hidden = view.group !== "generation";
   if (view.group === "generation") el.chord.innerHTML = renderChord(model, ctx);
+  revealFocus();
+}
+
+/** The renderer leaves room for the labels of every group; keep only what is drawn. */
+function cropToContent(svg) {
+  const label = Number(svg.getAttribute("font-size"));
+  // measured without the focus style, so the enlarged label does not rescale the view on each focus change
+  const focused = [...svg.querySelectorAll(".is-focus")];
+  for (const node of focused) node.classList.remove("is-focus");
+  const box = svg.getBBox();
+  for (const node of focused) node.classList.add("is-focus");
+  if (!box.width || !box.height) return; // not laid out: a hidden page keeps the full view
+  const pad = label; // strokes and the focused label's growth are outside the box
+  svg.setAttribute("viewBox", [box.x - pad, box.y - pad, box.width + 2 * pad, box.height + 2 * pad].map((value) => value.toFixed(3)).join(" "));
+}
+
+/** Drawing size in label heights: the stylesheet shares space in these proportions. */
+function setLabelSpan(figure, scale) {
+  const svg = figure.querySelector("svg");
+  const label = Number(svg.getAttribute("font-size")) / scale;
+  const { width, height } = svg.viewBox.baseVal;
+  figure.style.setProperty("--w", (width / label).toFixed(2));
+  figure.style.setProperty("--h", (height / label).toFixed(2));
+}
+
+/** Scrolls the drawings panel, never the page, to the focused size if it is cut off. */
+function revealFocus() {
+  const panel = el.drawings;
+  const dimension = panel.querySelector(".dim.is-focus");
+  if (!dimension || panel.scrollHeight <= panel.clientHeight) return;
+  const box = dimension.getBoundingClientRect();
+  const frame = panel.getBoundingClientRect();
+  const margin = 12;
+  if (box.top < frame.top + margin) panel.scrollTop -= frame.top + margin - box.top;
+  else if (box.bottom > frame.bottom - margin) panel.scrollTop += box.bottom - (frame.bottom - margin);
 }
 
 function createViewer() {

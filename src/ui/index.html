@@ -21,45 +21,49 @@
       <input type="file" id="file-input" accept=".json,application/json" hidden>
     </div>
   </header>
-  <p id="boot" class="notice">Загрузка… Если страница так и не заработала, её открыли без локального сервера: браузеры не загружают модули с file://. Запустите <code>npm run ui</code> и откройте http://localhost:8080/.</p>
+  <p id="boot" class="notice">Загрузка… Если страница так и не заработала, её открыли без локального сервера: браузеры не загружают модули с file://. Запустите <code>npm run ui</code> и откройте http://127.0.0.1:8080/.</p>
   <p id="notice" class="notice" role="status" hidden></p>
   <nav id="groups" class="groups" aria-label="Разделы параметров"></nav>
   <main class="layout">
-    <section class="form-panel" aria-labelledby="group-title">
-      <h2 id="group-title"></h2>
-      <div id="form"></div>
-    </section>
-    <section class="preview" aria-labelledby="preview-title">
-      <div class="preview-head">
-        <h2 id="preview-title">3D-модель</h2>
-        <span class="tag" id="preview-state">строится…</span>
-      </div>
-      <div class="viewport" id="viewport" data-state="building">
-        <canvas id="viewer" tabindex="0" aria-label="3D-модель шкива" aria-describedby="viewer-help"></canvas>
-        <p id="preview-overlay" class="preview-overlay" aria-live="polite" hidden></p>
-      </div>
-      <p id="preview-info" class="preview-info"></p>
-      <div class="preview-actions">
-        <button type="button" id="view-reset">Исходный вид</button>
-        <button type="button" id="retry" hidden>Повторить построение</button>
-      </div>
-      <p id="viewer-help" class="drawing-help">Перетаскивание — поворот, с Shift или правой кнопкой — сдвиг, колесо — масштаб, двойной щелчок — исходный вид. С клавиатуры: стрелки, Shift+стрелки, + и −, 0. Грани, видимые с изнанки, окрашены красным — на исправной сетке их не видно.</p>
-    </section>
-    <section class="drawings" aria-label="Чертежи">
+    <div class="side">
+      <section class="form-panel" aria-labelledby="group-title">
+        <h2 id="group-title"></h2>
+        <div id="form"></div>
+      </section>
+      <section class="preview" aria-labelledby="preview-title">
+        <div class="preview-head">
+          <h2 id="preview-title">3D-модель</h2>
+          <span class="tag" id="preview-state">строится…</span>
+        </div>
+        <div class="viewport" id="viewport" data-state="building">
+          <canvas id="viewer" tabindex="0" aria-label="3D-модель шкива" aria-describedby="viewer-help"></canvas>
+          <p id="preview-overlay" class="preview-overlay" aria-live="polite" hidden></p>
+        </div>
+        <p id="preview-info" class="preview-info"></p>
+        <div class="preview-actions">
+          <button type="button" id="view-reset">Исходный вид</button>
+          <button type="button" id="retry" hidden>Повторить построение</button>
+        </div>
+        <p id="viewer-help" class="drawing-help">Перетаскивание — поворот, с Shift или правой кнопкой — сдвиг, колесо — масштаб, двойной щелчок — исходный вид. С клавиатуры: стрелки, Shift+стрелки, + и −, 0. Грани, видимые с изнанки, окрашены красным — на исправной сетке их не видно.</p>
+      </section>
+    </div>
+    <section class="drawings" id="drawings" aria-label="Чертежи">
       <div id="status" class="status" aria-live="polite"></div>
       <p id="stale" class="stale" hidden>Чертёж по последним допустимым значениям: в одном из полей не число или число вне допустимого диапазона.</p>
       <figure id="chord-figure" hidden>
         <figcaption>Допуск хорды <span class="tag">схема, прогиб увеличен</span></figcaption>
         <div id="chord" class="drawing drawing-chord"></div>
       </figure>
-      <figure id="plan-figure">
-        <figcaption>Поперечный разрез по полотну <span class="tag" id="plan-tag">в масштабе</span></figcaption>
-        <div id="plan" class="drawing"></div>
-      </figure>
-      <figure id="section-figure">
-        <figcaption>Осевой разрез <span class="tag" id="section-tag">в масштабе</span></figcaption>
-        <div id="section" class="drawing"></div>
-      </figure>
+      <div class="views">
+        <figure id="plan-figure">
+          <figcaption>Поперечный разрез по полотну <span class="tag" id="plan-tag">в масштабе</span></figcaption>
+          <div id="plan" class="drawing"></div>
+        </figure>
+        <figure id="section-figure">
+          <figcaption>Осевой разрез <span class="tag" id="section-tag">в масштабе</span></figcaption>
+          <div id="section" class="drawing"></div>
+        </figure>
+      </div>
       <p class="drawing-help">Щёлкните по размеру, чтобы перейти к его полю, или по части детали, чтобы открыть её раздел.</p>
     </section>
   </main>
