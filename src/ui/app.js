@@ -27,7 +27,7 @@ const CONTEXT_VIEW_SCALE = 0.6; // labels of a view with no sizes of its own, re
 const PREVIEW_TAGS = { fresh: "по текущим параметрам", building: "строится…", invalid: "устарела", failed: "не построена", crashed: "сбой" };
 const $ = (selector) => document.querySelector(selector);
 const el = {
-  nav: $("#groups"), title: $("#group-title"), form: $("#form"), status: $("#status"), drawings: $("#drawings"),
+  nav: $("#groups"), title: $("#group-title"), form: $("#form"), sizes: $("#sizes"), status: $("#status"), drawings: $("#drawings"),
   plan: $("#plan"), section: $("#section"), sectionTag: $("#section-tag"), planTag: $("#plan-tag"),
   chordFigure: $("#chord-figure"), chord: $("#chord"), planFigure: $("#plan-figure"), sectionFigure: $("#section-figure"),
   toothFigure: $("#tooth-figure"), tooth: $("#tooth"),
@@ -192,6 +192,7 @@ function renderForm() {
   el.title.textContent = groupTitle(group, state.description);
   if (view.group === "presets") {
     el.form.innerHTML = presetCards();
+    renderComputed();
     return;
   }
   const description = state.description;
@@ -199,18 +200,30 @@ function renderForm() {
     if (field.kind === "toggle") return toggleMarkup(field, description);
     if (field.kind === "choice") return choiceMarkup(field, description);
     return numberMarkup(field, description);
-  }).join("") + '<div id="computed"></div>';
+  }).join("");
   renderComputed();
 }
 
-/** The computed sizes follow every change; the fields above them are not rebuilt while typing. */
+/** The computed sizes follow every change and stay in sight beside the form, under the preview. */
 function renderComputed() {
-  const slot = el.form.querySelector("#computed");
-  if (slot) slot.innerHTML = computedMarkup();
+  const markup = view.group === "presets" ? "" : computedMarkup();
+  el.sizes.innerHTML = markup;
+  el.sizes.hidden = !markup;
 }
 
 function fieldId(path) {
   return `f${path.replaceAll("/", "-")}`;
+}
+
+// the hint and the messages of a field open from small buttons beside its label,
+// so the form stays short; the message button shows only while there is something to say
+function tipButtons(id) {
+  return `<button type="button" class="tip-toggle" aria-label="Пояснение" aria-expanded="false" aria-controls="${id}-hint">?</button><button type="button" class="tip-toggle tip-msg" aria-label="Сообщение" aria-expanded="false" aria-controls="${id}-msg" hidden>!</button>`;
+}
+
+function tipBoxes(id, hint) {
+  return `<p class="tip field-hint" id="${id}-hint" role="tooltip">${hint}</p>
+    <div class="tip field-msg" id="${id}-msg" aria-live="polite"></div>`;
 }
 
 function numberMarkup(field, description) {
@@ -219,14 +232,13 @@ function numberMarkup(field, description) {
   const unit = field.unit ? ` ${field.unit}` : "";
   const range = `${formatNumber(limits.minimum)}…${formatNumber(limits.maximum)}${unit}`;
   return `<div class="field" data-field="${field.path}">
-    <label for="${id}"><span class="field-label">${escapeHtml(fieldLabel(field, description))}</span> <span class="field-symbol">${symbolHtml(field.symbol)}</span></label>
+    <div class="field-head"><label for="${id}"><span class="field-label">${escapeHtml(fieldLabel(field, description))}</span> <span class="field-symbol">${symbolHtml(field.symbol)}</span></label>${tipButtons(id)}</div>
     <div class="input-row">
       <input id="${id}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-path="${field.path}"
         value="${escapeHtml(inputText(getValue(description, field.path)))}" aria-describedby="${id}-hint ${id}-msg">
       ${field.unit ? `<span class="unit">${field.unit}</span>` : ""}
     </div>
-    <p class="field-hint" id="${id}-hint">${escapeHtml(fieldHint(field, description))} <span class="range">Допустимо ${range}, по умолчанию ${formatNumber(limits.default)}${unit}.</span></p>
-    <div class="field-msg" id="${id}-msg" aria-live="polite"></div>
+    ${tipBoxes(id, `${escapeHtml(fieldHint(field, description))} <span class="range">Допустимо ${range}, по умолчанию ${formatNumber(limits.default)}${unit}.</span>`)}
   </div>`;
 }
 
@@ -234,21 +246,19 @@ function toggleMarkup(field, description) {
   const id = fieldId(field.path);
   const checked = Boolean(getValue(description, field.path));
   return `<div class="field field-toggle" data-field="${field.path}">
-    <label class="toggle" for="${id}"><input id="${id}" type="checkbox" data-path="${field.path}"${checked ? " checked" : ""} aria-describedby="${id}-hint">
-      <span>${escapeHtml(fieldLabel(field, description))}</span></label>
-    <p class="field-hint" id="${id}-hint">${escapeHtml(fieldHint(field, description))}</p>
-    <div class="field-msg" aria-live="polite"></div>
+    <div class="field-head"><label class="toggle" for="${id}"><input id="${id}" type="checkbox" data-path="${field.path}"${checked ? " checked" : ""} aria-describedby="${id}-hint ${id}-msg">
+      <span>${escapeHtml(fieldLabel(field, description))}</span></label>${tipButtons(id)}</div>
+    ${tipBoxes(id, escapeHtml(fieldHint(field, description)))}
   </div>`;
 }
 
 function choiceMarkup(field, description) {
   const value = getValue(description, field.path);
-  const name = fieldId(field.path);
-  return `<fieldset class="field field-choice" data-field="${field.path}">
-    <legend>${escapeHtml(fieldLabel(field, description))}</legend>
-    <div class="segmented">${field.options.map((option) => `<label><input type="radio" name="${name}" value="${option.value}" data-path="${field.path}"${option.value === value ? " checked" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("")}</div>
-    <p class="field-hint">${escapeHtml(fieldHint(field, description))}</p>
-    <div class="field-msg" aria-live="polite"></div>
+  const id = fieldId(field.path);
+  return `<fieldset class="field field-choice" data-field="${field.path}" aria-describedby="${id}-hint ${id}-msg">
+    <legend><span class="field-head">${escapeHtml(fieldLabel(field, description))}${tipButtons(id)}</span></legend>
+    <div class="segmented">${field.options.map((option) => `<label><input type="radio" name="${id}" value="${option.value}" data-path="${field.path}"${option.value === value ? " checked" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("")}</div>
+    ${tipBoxes(id, escapeHtml(fieldHint(field, description)))}
   </fieldset>`;
 }
 
@@ -340,6 +350,10 @@ function renderMessages() {
     if (box) {
       box.innerHTML = own.map((item) => `<p class="msg msg-${diagnosticKind(item)}">${escapeHtml(diagnosticText(item, state.description))}</p>`).join("") +
         owners.map((owner) => `<p class="msg msg-ref">Связано с сообщением у поля «${escapeHtml(fieldLabel(FIELD_BY_PATH.get(owner), state.description))}».</p>`).join("");
+      const button = node.querySelector(".tip-msg");
+      button.hidden = !box.innerHTML;
+      if (button.hidden) button.setAttribute("aria-expanded", "false");
+      button.classList.toggle("tip-error", kind === "error");
     }
     for (const item of own) shown.add(item);
   }
@@ -600,6 +614,21 @@ el.form.addEventListener("click", (event) => {
   openGroup("rim");
   const shaft = view.keepShaft ? ", втулка и отверстие прежние" : "";
   showNotice(created ? `Новая деталь «${kindOf(description).title}»: размеры по умолчанию${shaft}.` : `Загружен вариант «${chosen.title}»${shaft}.`);
+});
+
+// a tip shows while its button is hovered or focused, a click keeps it open until a click elsewhere
+function closeTips(except = null) {
+  for (const button of document.querySelectorAll('.tip-toggle[aria-expanded="true"]')) {
+    if (button !== except) button.setAttribute("aria-expanded", "false");
+  }
+}
+document.addEventListener("click", (event) => {
+  const button = event.target.closest(".tip-toggle");
+  closeTips(button);
+  if (button) button.setAttribute("aria-expanded", String(button.getAttribute("aria-expanded") !== "true"));
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeTips();
 });
 
 el.status.addEventListener("click", (event) => {

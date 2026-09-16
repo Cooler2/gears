@@ -26,6 +26,9 @@
   color-scheme: light;
 }
 
+/* panels and figures set their own display, which would otherwise override the attribute */
+[hidden] { display: none !important; }
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #16181c;
@@ -225,6 +228,7 @@ button {
 .side { grid-area: side; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .form-panel { grid-area: form; }
 .drawings { grid-area: drawings; }
+.sizes { grid-area: sizes; }
 .preview { grid-area: preview; position: sticky; top: 12px; }
 
 /* a third column only when the window is also tall: in a low one the drawings
@@ -232,19 +236,21 @@ button {
 @media (min-width: 1500px) and (min-height: 860px) {
   .layout {
     grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) minmax(360px, 0.8fr);
-    grid-template-areas: "form drawings preview";
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "form drawings preview" "form drawings sizes";
   }
+  .preview { position: static; }
   .side { display: contents; }
 }
 
 @media (max-width: 860px) {
-  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "form" "drawings" "preview"; padding: 16px; }
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "form" "sizes" "drawings" "preview"; padding: 16px; }
   .side { display: contents; }
   .preview { position: static; }
   .top, .groups { padding-left: 16px; padding-right: 16px; }
 }
 
-.form-panel, .drawings, .preview {
+.form-panel, .sizes, .drawings, .preview {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -259,7 +265,8 @@ button {
 /* fields */
 
 .field {
-  margin: 0 0 16px;
+  position: relative;
+  margin: 0 0 8px;
   padding: 10px 12px;
   border: 1px solid transparent;
   border-left: 3px solid transparent;
@@ -274,11 +281,15 @@ button {
 .field.has-error { border-left-color: var(--error); }
 .field.has-advice { border-left-color: var(--advice); }
 
-.field label {
-  display: block;
-  font-weight: 600;
+.field-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 6px;
 }
+
+.field label { font-weight: 600; }
+.field-toggle .field-head { margin-bottom: 0; }
 
 .field-symbol {
   font-weight: 400;
@@ -311,16 +322,12 @@ button {
 
 .unit { color: var(--muted); }
 
-.field-hint {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--muted);
-}
-
 .range { white-space: nowrap; }
 
+.field-msg .msg + .msg { margin-top: 6px; }
+
 .field-msg .msg {
-  margin: 6px 0 0;
+  margin: 0;
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 13.5px;
@@ -344,8 +351,10 @@ button {
 .field-choice legend {
   font-weight: 600;
   padding: 0;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
+
+.field-choice legend .field-head { margin: 0; }
 
 .segmented {
   display: inline-flex;
@@ -382,12 +391,6 @@ button {
 .segmented input:focus-visible + span {
   outline: 3px solid var(--accent);
   outline-offset: -3px;
-}
-
-.computed {
-  margin-top: 8px;
-  padding: 12px;
-  border-top: 1px dashed var(--line);
 }
 
 .computed h3 {
@@ -519,11 +522,58 @@ figcaption {
 /* 3D preview */
 
 .preview-head {
+  position: relative;
   display: flex;
   align-items: baseline;
   gap: 8px;
   margin-bottom: 10px;
 }
+
+/* small round buttons that open a hint or messages over the content below */
+.tip-toggle {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.tip-toggle:hover, .tip-toggle[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.tip-msg { border-color: var(--advice); background: var(--advice-soft); color: var(--advice); }
+.tip-msg.tip-error { border-color: var(--error); background: var(--error); color: var(--on-accent); }
+.tip-msg.tip-error:hover, .tip-msg.tip-error[aria-expanded="true"] { color: var(--on-accent); box-shadow: 0 0 0 2px var(--error-soft); }
+
+.tip {
+  position: absolute;
+  z-index: 5;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  font-size: 13.5px;
+  font-weight: 400;
+  color: var(--text);
+  visibility: hidden;
+}
+
+.preview-head .tip { top: calc(100% + 6px); left: 0; right: 0; }
+/* a field tip keeps its place under the control and covers the fields below */
+.field .tip { left: 8px; right: 8px; margin-top: 4px; }
+.field-msg { padding: 6px; }
+
+.preview-head:has(.tip-toggle:is(:hover, :focus-visible, [aria-expanded="true"])) .tip,
+.field:has(> .field-head .tip-toggle:not(.tip-msg):is(:hover, :focus-visible, [aria-expanded="true"])) > .field-hint,
+.field:has(> legend .tip-toggle:not(.tip-msg):is(:hover, :focus-visible, [aria-expanded="true"])) > .field-hint,
+.field:has(.tip-msg:is(:hover, :focus-visible, [aria-expanded="true"])) > .field-msg { visibility: visible; }
 
 .preview-head h2 { margin: 0; font-size: 18px; }
 
@@ -739,12 +789,17 @@ figcaption {
 }
 
 @media (min-width: 1500px) and (min-height: 860px) {
-  .form-panel, .preview { min-height: 0; overflow-y: auto; } /* three columns, each scrolls by itself */
+  .layout { grid-template-rows: auto minmax(0, 1fr); }
+  .form-panel { grid-row: 1 / 3; }
+  .drawings { grid-row: 1 / 3; }
+  .form-panel, .preview, .sizes { min-height: 0; overflow-y: auto; } /* three columns, each scrolls by itself */
+  .sizes { align-self: start; max-height: 100%; }
 }
 
 /* the variants page: one column over the whole width, no drawings and no preview */
 body[data-page="presets"] .drawings,
-body[data-page="presets"] .preview { display: none; }
+body[data-page="presets"] .preview,
+body[data-page="presets"] .sizes { display: none; }
 body[data-page="presets"] .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "side"; }
 body[data-page="presets"] .side { display: flex; grid-area: side; }
 body[data-page="presets"] .form-panel { overflow: visible; }

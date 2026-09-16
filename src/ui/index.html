@@ -30,9 +30,12 @@
         <h2 id="group-title"></h2>
         <div id="form"></div>
       </section>
+      <section class="sizes" id="sizes" aria-label="Вычисленные размеры" aria-live="polite" hidden></section>
       <section class="preview" aria-labelledby="preview-title">
         <div class="preview-head">
           <h2 id="preview-title">3D-модель</h2>
+          <button type="button" class="tip-toggle" aria-label="Как управлять видом" aria-expanded="false" aria-controls="viewer-help">?</button>
+          <p id="viewer-help" class="tip" role="tooltip">Перетаскивание — поворот, с Shift или правой кнопкой — сдвиг, колесо — масштаб, двойной щелчок — исходный вид. С клавиатуры: стрелки, Shift+стрелки, + и −, 0. Грани, видимые с изнанки, окрашены красным — на исправной сетке их не видно.</p>
           <span class="tag" id="preview-state">строится…</span>
         </div>
         <div class="viewport" id="viewport" data-state="building">
@@ -44,7 +47,6 @@
           <button type="button" id="view-reset">Исходный вид</button>
           <button type="button" id="retry" hidden>Повторить построение</button>
         </div>
-        <p id="viewer-help" class="drawing-help">Перетаскивание — поворот, с Shift или правой кнопкой — сдвиг, колесо — масштаб, двойной щелчок — исходный вид. С клавиатуры: стрелки, Shift+стрелки, + и −, 0. Грани, видимые с изнанки, окрашены красным — на исправной сетке их не видно.</p>
       </section>
     </div>
     <section class="drawings" id="drawings" aria-label="Чертежи">
