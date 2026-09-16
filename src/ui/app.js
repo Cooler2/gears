@@ -289,23 +289,20 @@ function boreRows({ normalized: { bore }, derived }) {
   ].filter(Boolean);
 }
 
-/** The variants page: continue with the current part, or start a new one of any kind. */
+/** The variants page: start a new part of any kind; the sections above lead back to the current one. */
 function presetCards() {
   const card = (attributes, className, description, title, text) => `<button type="button" class="preset ${className}" ${attributes}>
     <span class="preset-thumb" aria-hidden="true">${thumbnailOf(description)}</span>
     <span class="preset-title">${escapeHtml(title)}</span>
     <span class="preset-text">${escapeHtml(text)}</span></button>`;
-  const current = card("data-continue", "preset-current", state.description, "Текущие параметры",
-    `${kindOf(state.description).title}. Продолжить настройку с того места, где вы остановились.`);
   const sections = KINDS.map((kind) => `<h3 class="preset-kind">${escapeHtml(kind.title)}</h3>
     <p class="lead">${escapeHtml(kind.text)}</p>
     <div class="presets">${card(`data-new="${kind.id}"`, "preset-new", defaultDescription(schema, kind.id), "Новый", "Все размеры по умолчанию.")}${
       presets.map((preset, index) => preset.description.kind === kind.id
         ? card(`data-preset="${index}"`, "", preset.description, preset.title, preset.text) : "").join("")}</div>`).join("");
-  return `<p class="lead">Начните с готового варианта: он заменит текущие параметры, дальше их можно менять в любом разделе. Или продолжите с текущими.</p>
+  return `<p class="lead">Начните с готового варианта: он заменит текущие параметры, дальше их можно менять в любом разделе. Чтобы продолжить с текущими, откройте любой раздел.</p>
     <label class="toggle keep-shaft"><input type="checkbox" id="keep-shaft"${view.keepShaft ? " checked" : ""}>
-      <span>Оставить текущие втулку и отверстие — для детали на тот же вал</span></label>
-    <div class="presets">${current}</div>${sections}`;
+      <span>Оставить текущие втулку и отверстие — для детали на тот же вал</span></label>${sections}`;
 }
 
 /** Plan view without sizes, or nothing for a description that cannot be drawn. */
@@ -593,10 +590,6 @@ el.form.addEventListener("keydown", (event) => {
 });
 
 el.form.addEventListener("click", (event) => {
-  if (event.target.closest("[data-continue]")) {
-    openGroup("rim");
-    return;
-  }
   const created = event.target.closest("[data-new]");
   const preset = event.target.closest("[data-preset]");
   if (!created && !preset) return;

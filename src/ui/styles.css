@@ -435,7 +435,6 @@ button {
 }
 
 .preset:hover { border-color: var(--accent); }
-.preset-current { border-style: dashed; }
 .preset-new { border-style: dashed; }
 .preset-kind { margin: 22px 0 4px; font-size: 16px; }
 .preset-kind + .lead { margin-bottom: 10px; }
@@ -749,8 +748,5 @@ body[data-page="presets"] .preview { display: none; }
 body[data-page="presets"] .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "side"; }
 body[data-page="presets"] .side { display: flex; grid-area: side; }
 body[data-page="presets"] .form-panel { overflow: visible; }
-body[data-page="presets"] .presets { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-body[data-page="presets"] .preset { padding: 14px; gap: 6px; }
-body[data-page="presets"] .preset-thumb svg { max-height: 260px; }
-body[data-page="presets"] .preset-title { font-size: 16px; }
-body[data-page="presets"] .preset-text { font-size: 14px; }
+body[data-page="presets"] .presets { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+body[data-page="presets"] .preset-thumb svg { max-height: 130px; }
