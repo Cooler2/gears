@@ -11,8 +11,8 @@
 import { buildPlanView, validateDescription } from "../core/generate.js";
 import { exportBinaryStl } from "../export/stl.js";
 import { BuildClient } from "../worker/client.js";
-import { chordSummary, renderChord, renderPlan, renderSection } from "./drawings.js";
-import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupTitle, kindOf } from "./fields.js";
+import { chordSummary, renderChord, renderPlan, renderSection, renderTooth } from "./drawings.js";
+import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle, kindOf } from "./fields.js";
 import { escapeHtml, formatNumber, inputText, plural, symbolHtml } from "./format.js";
 import { diagnosticKind, diagnosticText } from "./messages.js";
 import { PRESETS } from "./presets.js";
@@ -30,6 +30,7 @@ const el = {
   nav: $("#groups"), title: $("#group-title"), form: $("#form"), status: $("#status"), drawings: $("#drawings"),
   plan: $("#plan"), section: $("#section"), sectionTag: $("#section-tag"), planTag: $("#plan-tag"),
   chordFigure: $("#chord-figure"), chord: $("#chord"), planFigure: $("#plan-figure"), sectionFigure: $("#section-figure"),
+  toothFigure: $("#tooth-figure"), tooth: $("#tooth"),
   stale: $("#stale"), file: $("#file-input"), notice: $("#notice"),
   viewport: $("#viewport"), canvas: $("#viewer"), previewState: $("#preview-state"), overlay: $("#preview-overlay"),
   previewInfo: $("#preview-info"), retry: $("#retry"), stl: $("#download-stl"),
@@ -145,6 +146,8 @@ function writeHash() {
 function renderAll() {
   // the variants take the whole page: drawings and the preview belong to the editor
   document.body.dataset.page = view.group === "presets" ? "presets" : "editor";
+  // a group the part does not have (flanges of a gear) falls back to its rim
+  if (!groupsOf(state.description).some(({ id }) => id === view.group)) view.group = "rim";
   renderHeader();
   renderNav();
   renderForm();
@@ -173,7 +176,7 @@ function renderNav() {
       counts.set(group, entry);
     }
   }
-  el.nav.innerHTML = GROUPS.map((group) => {
+  el.nav.innerHTML = groupsOf(state.description).map((group) => {
     const { id } = group;
     const title = groupTitle(group, state.description);
     const count = counts.get(id);
@@ -204,7 +207,7 @@ function fieldId(path) {
 
 function numberMarkup(field, description) {
   const id = fieldId(field.path);
-  const limits = fieldSchema(schema, field);
+  const limits = fieldSchema(schema, field, description);
   const unit = field.unit ? ` ${field.unit}` : "";
   const range = `${formatNumber(limits.minimum)}…${formatNumber(limits.maximum)}${unit}`;
   return `<div class="field" data-field="${field.path}">
@@ -244,9 +247,12 @@ function computedMarkup() {
   if (!model) return "";
   const { derived, anchors } = model;
   const rows = {
-    rim: derived.pitchRadius === null
-      ? [["Внутренний диаметр обода", 2 * derived.rimInnerRadius]]
-      : [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]],
+    rim: {
+      idlerPulley: [["Внутренний диаметр обода", 2 * derived.rimInnerRadius]],
+      spurGear: [["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр вершин", 2 * derived.outsideRadius], ["Диаметр впадин", 2 * derived.rootRadius],
+        ["Основной диаметр", 2 * derived.baseRadius], ["Шаг по делительной окружности", derived.pitch], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]],
+      timingPulley: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]]
+    }[model.normalized.kind],
     flanges: [["Диаметр нижнего фланца", derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], ["Диаметр верхнего фланца", derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], ["Полная высота детали", derived.bounds.max[2] - derived.bounds.min[2]]],
     web: [[`Промежуток между втулкой и ${derived.pitchRadius === null ? "ободом" : "венцом"}`, anchors.radii.rimInner - anchors.radii.hub], ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
     hub: [["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius], ["Втулка по высоте, от", derived.hubLowerZ], ["до", derived.hubUpperZ]],
@@ -358,7 +364,8 @@ function drawingContext() {
 function renderDrawings() {
   el.stale.hidden = Boolean(result.normalized);
   if (!model) {
-    el.plan.innerHTML = el.section.innerHTML = "";
+    el.plan.innerHTML = el.section.innerHTML = el.tooth.innerHTML = "";
+    el.toothFigure.hidden = true;
     return;
   }
   const ctx = drawingContext();
@@ -377,6 +384,14 @@ function renderDrawings() {
   el.planTag.textContent = view.group === "bore" ? "втулка крупно, в масштабе"
     : model.plan.spokes?.schematic ? "спицы схематично: скругления не помещаются" : "в масштабе";
   el.sectionTag.textContent = model.normalized.web.type === "spokes" ? "в масштабе, спицы — разрез по спице" : "в масштабе";
+  // gear teeth get a larger view of their own sizes
+  const teeth = view.group === "rim" && model.normalized.kind === "spurGear";
+  el.toothFigure.hidden = !teeth;
+  el.tooth.innerHTML = teeth ? renderTooth(model, ctx) : "";
+  if (teeth) {
+    cropToContent(el.tooth.querySelector("svg"));
+    setLabelSpan(el.toothFigure, 1);
+  }
   el.chordFigure.hidden = view.group !== "generation";
   if (view.group === "generation") el.chord.innerHTML = renderChord(model, ctx);
   revealFocus();
@@ -555,7 +570,7 @@ el.form.addEventListener("keydown", (event) => {
   const current = parseNumber(input.value);
   if (Number.isNaN(current)) return;
   event.preventDefault();
-  const step = (fieldSchema(schema, field).integer ? 1 : 0.1) * (event.shiftKey ? 10 : 1);
+  const step = (fieldSchema(schema, field, state.description).integer ? 1 : 0.1) * (event.shiftKey ? 10 : 1);
   const next = Number((current + (event.key === "ArrowUp" ? step : -step)).toFixed(6));
   input.value = inputText(next);
   input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -584,7 +599,7 @@ el.status.addEventListener("click", (event) => {
 });
 
 // drawings: a dimension focuses its field, a part opens its group
-for (const container of [el.plan, el.section, el.chord]) {
+for (const container of [el.plan, el.section, el.chord, el.tooth]) {
   container.addEventListener("click", (event) => pickFromDrawing(event.target));
   container.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -644,7 +659,9 @@ el.retry.addEventListener("click", () => {
 });
 
 function partFileName({ kind, rim }) {
-  return kind === "idlerPulley" ? `idler-${String(rim.outerDiameter).replace(".", "_")}mm` : `pulley-${rim.toothCount}t`;
+  const number = (value) => String(value).replace(".", "_");
+  if (kind === "idlerPulley") return `idler-${number(rim.outerDiameter)}mm`;
+  return kind === "spurGear" ? `gear-m${number(rim.module)}-${rim.toothCount}t` : `pulley-${rim.toothCount}t`;
 }
 
 function download(blob, name) {

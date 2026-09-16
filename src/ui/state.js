@@ -12,9 +12,12 @@ const BORE_EXTRAS = { round: [], polygon: ["sides"], dFlat: ["flatDistance"], ke
 
 export function defaultDescription(schema, kind = "timingPulley") {
   const value = (definition, property) => schema.$defs[definition].properties[property].default;
-  const rim = kind === "idlerPulley"
-    ? { outerDiameter: value("idlerRim", "outerDiameter") }
-    : { profile: schema.$defs.timingRim.properties.profile.const, toothCount: value("timingRim", "toothCount") };
+  const rims = {
+    timingPulley: () => ({ profile: schema.$defs.timingRim.properties.profile.const, toothCount: value("timingRim", "toothCount") }),
+    idlerPulley: () => ({ outerDiameter: value("idlerRim", "outerDiameter") }),
+    spurGear: () => Object.fromEntries(["module", "toothCount", "pressureAngle", "profileShift", "backlash"].map((field) => [field, value("gearRim", field)]))
+  };
+  const rim = rims[kind]();
   return {
     schemaVersion: schema.properties.schemaVersion.const,
     kind,

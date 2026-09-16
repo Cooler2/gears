@@ -12,7 +12,11 @@ const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.
 async function kindBases() {
   const timing = await readJson("../examples/valid/spokes-flanged.json");
   const idler = { ...structuredClone(timing), kind: "idlerPulley", rim: { outerDiameter: 40, width: timing.rim.width, radialThickness: 2 } };
-  return { timing, idler };
+  const gear = {
+    ...structuredClone(timing), kind: "spurGear",
+    rim: { module: 1, toothCount: 40, pressureAngle: 20, profileShift: 0.2, backlash: 0.1, width: timing.rim.width, radialThickness: 2 }
+  };
+  return { timing, idler, gear };
 }
 
 const FLANGE_VARIANTS = {
@@ -47,6 +51,8 @@ const BORE_VARIANTS = {
 test("every kind, flange, web and hub-extension combination builds one closed solid", async () => {
   for (const [kindName, base] of Object.entries(await kindBases())) {
   for (const [flangeName, flanges] of Object.entries(FLANGE_VARIANTS)) {
+    // a gear has no flanges
+    if (kindName === "gear" && flangeName !== "none") continue;
     for (const [webName, web] of Object.entries(WEB_VARIANTS)) {
       for (const [lowerExtension, upperExtension] of HUB_VARIANTS) {
         const input = { ...structuredClone(base), flanges, web };

@@ -10,6 +10,7 @@
 // group; regions that explain a switch (flange, web type) also carry data-path.
 
 import { circleSegmentCount } from "../core/contours.js";
+import { buildSpurGearContour, spurGearGeometry } from "../core/involute.js";
 import { FIELD_BY_PATH, fieldLabel } from "./fields.js";
 import { escapeHtml, formatNumber, splitSymbol } from "./format.js";
 
@@ -149,7 +150,7 @@ export function renderPlan(model, ctx) {
   const toothed = Boolean(plan.profile);
 
   if (toothed) {
-    // N: a dot on every groove, the label above the pulley
+    // N: a dot on every groove or tooth, the label above the part
     const dots = Array.from({ length: rim.toothCount }, (_, k) => polar(outer + 0.5 * u, 2 * Math.PI * k / rim.toothCount));
     out.push(wrap(ctx, "/rim/toothCount", rim.toothCount,
       dots.map((point) => `<path class="dim-dot" d="${circlePath(0.13 * u, point)}"/>`).join("") +
@@ -164,8 +165,9 @@ export function renderPlan(model, ctx) {
     }));
   }
 
-  // T_r to the lower right, along a groove of a toothed rim
-  const rimAngle = toothed ? 2 * Math.PI * Math.round(rim.toothCount * 3 / 8) / rim.toothCount : 3 * Math.PI / 4;
+  // T_r to the lower right, along a groove of a pulley or a space between gear teeth
+  const spaceOffset = normalized.kind === "spurGear" ? Math.PI / rim.toothCount : 0;
+  const rimAngle = toothed ? 2 * Math.PI * Math.round(rim.toothCount * 3 / 8) / rim.toothCount + spaceOffset : 3 * Math.PI / 4;
   const rimDirection = polar(1, rimAngle);
   out.push(dimension(ctx, "/rim/radialThickness", {
     u, a: mul(rimDirection, rimInner), b: mul(rimDirection, r.root), value: rim.radialThickness,
@@ -278,6 +280,88 @@ function spokeDimensions(ctx, plan, web, u, outer) {
       radiusLine(rimMark) + radiusLine(hubMark) + leader + labelMarkup("/web/filletRadius", web.filletRadius, add(labelAt, [0.3 * u, 0]), "start")));
   }
   return out;
+}
+
+// -------------------------------------------------------------- tooth view
+
+/**
+ * A few gear teeth around the one on +Y, at a larger scale, for the tooth sizes.
+ * The outline is cut by a frame; the frame alone is measured when the view is cropped.
+ */
+export function renderTooth(model, ctx) {
+  const { rim } = model.normalized;
+  const gear = spurGearGeometry(rim);
+  const nominal = spurGearGeometry({ ...rim, backlash: 0 });
+  const m = rim.module;
+  const step = 2 * Math.PI / rim.toothCount; // tooth centre to tooth centre
+  const pitch = Math.PI * m;
+  const u = pitch / 8;
+  const halfWidth = 1.3 * pitch;
+  const top = gear.fullTip + 0.6 * m;
+  const bottom = Math.sqrt(Math.max(gear.root ** 2 - halfWidth ** 2, 0)) - 0.6 * m;
+  const frame = rectPath(-halfWidth, bottom, halfWidth, top);
+  const angleOf = ([x, y]) => Math.atan2(x, y);
+
+  // pitch circle dash-dotted; with a shift the rack datum line dashed
+  const inside = [part(ctx, "rim", polygonPath(model.plan.profile)), `<path class="pitch-line" d="${circlePath(gear.pitch)}"/>`];
+  if (rim.profileShift !== 0) inside.push(`<path class="nominal-line" d="${circlePath(gear.pitch + rim.profileShift * m)}"/>`);
+  if (rim.backlash > 0) {
+    // the central tooth without thinning, dashed, from its left root to its right root
+    const outline = buildSpurGearContour({ ...rim, backlash: 0 }, 0.005 * m)
+      .filter((point) => point[1] > 0 && Math.abs(angleOf(point)) < step / 2)
+      .sort((a, b) => angleOf(a) - angleOf(b));
+    inside.push(`<path class="nominal-line" d="M${outline.map(P).join("L")}"/>`);
+  }
+  const out = [`<g class="detail" clip-path="url(#tooth-detail)">${inside.join("")}</g>`, `<path class="detail-edge" d="${frame}"/>`];
+
+  // m: the pitch between the centres of two teeth, above the frame
+  const level = top + 1.3 * u;
+  const [pitchA, pitchB] = [0, step].map((angle) => polar(level, angle));
+  const pitchMiddle = mul(add(pitchA, pitchB), 0.5);
+  out.push(dimension(ctx, "/rim/module", {
+    u, a: pitchA, b: pitchB, value: m,
+    ext: [0, step].map((angle) => [polar(gear.fullTip + 0.3 * u, angle), polar(level + 0.4 * u, angle)]),
+    label: add(pitchMiddle, [0, 1.1 * u]), anchor: "middle",
+    extra: `<text class="note" x="${f(pitchMiddle[0])}" y="${f(-(pitchMiddle[1] + 2.2 * u))}" text-anchor="middle">шаг πm = ${escapeHtml(formatNumber(pitch))}</text>`
+  }));
+
+  // α: at the pitch point of the left flank, between the tangent to the pitch circle
+  // and the line of action, the flank normal that touches the base circle
+  const pitchHalf = gear.halfAngle(gear.pitch);
+  const point = polar(gear.pitch, -pitchHalf);
+  const touch = polar(gear.base, -pitchHalf + rim.pressureAngle * Math.PI / 180);
+  const action = unit(sub(point, touch));
+  const tangent = perp(unit(point)); // along the pitch circle, away from the tooth
+  const arc = Array.from({ length: 9 }, (_, index) => add(point, mul(unit(add(mul(tangent, 1 - index / 8), mul(action, index / 8))), 2.2 * u)));
+  const arcPath = `M${arc.map(P).join("L")}`;
+  const angleLabel = [-halfWidth - 0.8 * u, arc[4][1] + 1.2 * u];
+  out.push(wrap(ctx, "/rim/pressureAngle", rim.pressureAngle,
+    `<path class="dim-ext" d="M${P(add(point, mul(action, -2 * u)))}L${P(add(point, mul(action, 3 * u)))}M${P(add(point, mul(tangent, -1.5 * u)))}L${P(add(point, mul(tangent, 3 * u)))}"/>` +
+    `<path class="dim-line" d="${arcPath}"/><path class="dim-hit" d="${arcPath}"/>` +
+    `<path class="dim-ext" d="M${P(arc[4])}L${P(angleLabel)}"/>` +
+    labelMarkup("/rim/pressureAngle", rim.pressureAngle, add(angleLabel, [-0.3 * u, 0]), "end")));
+
+  // x: the rack datum moved from the pitch circle, in the space right of the tooth;
+  // j: the thinning at the pitch circle on the right flank, against the dashed tooth
+  const labelX = halfWidth + 0.8 * u;
+  const shiftFrom = polar(gear.pitch, step / 2);
+  const shiftTo = polar(gear.pitch + rim.profileShift * m, step / 2);
+  const shiftLabel = [labelX, gear.pitch + 1.6 * u];
+  out.push(dimension(ctx, "/rim/profileShift", {
+    u, a: shiftFrom, b: shiftTo, value: rim.profileShift,
+    leader: [shiftTo, shiftLabel], label: add(shiftLabel, [0.3 * u, 0]), anchor: "start"
+  }));
+  const flank = polar(gear.pitch, pitchHalf);
+  const nominalFlank = polar(gear.pitch, nominal.halfAngle(gear.pitch));
+  const thinningLabel = [labelX, gear.pitch - 1.6 * u];
+  out.push(dimension(ctx, "/rim/backlash", {
+    u, a: flank, b: nominalFlank, value: rim.backlash,
+    leader: [nominalFlank, thinningLabel], label: add(thinningLabel, [0.3 * u, 0]), anchor: "start"
+  }));
+
+  const defs = `<clipPath id="tooth-detail"><path d="${frame}"/></clipPath>`;
+  const box = [-halfWidth - 7 * u, -(level + 3.2 * u), 2 * halfWidth + 14 * u, level + 3.2 * u - bottom + u];
+  return svgRoot(box, u, out.join(""), "Зубья крупно", defs);
 }
 
 // ------------------------------------------------------------- section view

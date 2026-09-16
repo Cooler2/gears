@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildPlanView, validateDescription } from "../src/core/generate.js";
-import { chordSummary, renderChord, renderPlan, renderSection } from "../src/ui/drawings.js";
-import { FIELD_BY_PATH, FIELDS, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupTitle } from "../src/ui/fields.js";
+import { chordSummary, renderChord, renderPlan, renderSection, renderTooth } from "../src/ui/drawings.js";
+import { FIELD_BY_PATH, FIELDS, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle } from "../src/ui/fields.js";
 import { formatNumber, inputText, plural, splitSymbol } from "../src/ui/format.js";
 import { diagnosticKind, diagnosticText } from "../src/ui/messages.js";
 import { PRESETS } from "../src/ui/presets.js";
@@ -42,9 +42,14 @@ test("every field is described completely and its limits come from the schema", 
     assert.ok(field.label && field.hint, field.path);
     if (!numeric(field)) continue;
     assert.ok(field.symbol, `${field.path} has no drawing symbol`);
-    const limits = fieldSchema(schema, field);
-    for (const key of ["minimum", "maximum", "default"]) assert.ok(Number.isFinite(limits[key]), `${field.path} ${key}`);
-    assert.ok(limits.minimum <= limits.default && limits.default <= limits.maximum, field.path);
+    // limits may depend on the kind: check them for every kind that has the field
+    for (const { id: kind } of KINDS) {
+      const description = createState(schema, kind).description;
+      if (field.applies && !field.applies(description)) continue;
+      const limits = fieldSchema(schema, field, description);
+      for (const key of ["minimum", "maximum", "default"]) assert.ok(Number.isFinite(limits[key]), `${field.path} ${kind} ${key}`);
+      assert.ok(limits.minimum <= limits.default && limits.default <= limits.maximum, `${field.path} ${kind}`);
+    }
   }
   // every number the contract lets a person choose has a field (together the examples have all parts)
   const leaves = [];
@@ -61,9 +66,10 @@ test("each visible numeric field has a dimension on the drawings of its group", 
   for (const name of await exampleNames("valid")) {
     const model = modelOf(await readJson(`../examples/valid/${name}`));
     assert.equal(model.ok, true, name);
-    for (const { id: group } of GROUPS.filter(({ id }) => id !== "presets")) {
+    for (const { id: group } of groupsOf(model.normalized).filter(({ id }) => id !== "presets")) {
       const ctx = contextFor(model, group);
-      const drawings = [renderPlan(model, ctx), renderSection(model, ctx), group === "generation" ? renderChord(model, ctx) : ""].map(dimensionPaths);
+      const teeth = group === "rim" && model.normalized.kind === "spurGear";
+      const drawings = [renderPlan(model, ctx), renderSection(model, ctx), group === "generation" ? renderChord(model, ctx) : "", teeth ? renderTooth(model, ctx) : ""].map(dimensionPaths);
       const drawn = drawings.flat();
       const expected = [...ctx.visible].filter((path) => numeric(FIELDS.find((field) => field.path === path)));
       // a size may appear on both views (the diameters do), but once per view
@@ -208,6 +214,14 @@ test("each kind has valid defaults, variants, its own rim fields and words", asy
   const paths = (description) => fieldsOf("rim", description).map(({ path }) => path);
   assert.deepEqual(paths(timing), ["/rim/toothCount", "/rim/width", "/rim/radialThickness"]);
   assert.deepEqual(paths(idler), ["/rim/outerDiameter", "/rim/width", "/rim/radialThickness"]);
+  const gear = createState(schema, "spurGear").description;
+  assert.deepEqual(paths(gear), ["/rim/module", "/rim/toothCount", "/rim/pressureAngle", "/rim/profileShift", "/rim/backlash", "/rim/width", "/rim/radialThickness"]);
+  assert.equal(fieldSchema(schema, FIELD_BY_PATH.get("/rim/toothCount"), gear).minimum, 6, "a gear takes fewer teeth than a pulley");
+  assert.equal(fieldSchema(schema, FIELD_BY_PATH.get("/rim/toothCount"), timing).minimum, 14);
+  assert.ok(!groupsOf(gear).some(({ id }) => id === "flanges"), "a gear has no flanges");
+  assert.ok(groupsOf(idler).some(({ id }) => id === "flanges"));
+  const flanged = validateDescription(await readJson("../examples/invalid/gear-flange.json")).diagnostics[0];
+  assert.match(diagnosticText(flanged, gear), /У шестерни нет фланцев/);
   const rim = GROUPS.find(({ id }) => id === "rim");
   assert.equal(groupTitle(rim, timing), "Ремень и зубья");
   assert.equal(groupTitle(rim, idler), "Ремень и обод");

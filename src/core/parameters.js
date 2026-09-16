@@ -1,4 +1,5 @@
 import { boreExtents } from "./contours.js";
+import { spurGearGeometry } from "./involute.js";
 import { PART_KINDS, RIM_FIELDS, rimRadii, rimSizePath, rimSurface } from "./rims.js";
 
 const SCHEMA_VERSION = 3;
@@ -53,6 +54,7 @@ export function validateDescription(original) {
  * does not look like them is returned unchanged, and the argument is never modified.
  * Version 1 kept a round bore as hub.boreDiameter (version 2: bore.shape "round").
  * Versions 1 and 2 were timing pulleys only and called the rim width toothedWidth.
+ * Version 3 added the idler pulley and the spur gear without changing older kinds.
  */
 export function upgradeDescription(input) {
   let current = input;
@@ -111,6 +113,12 @@ function validateStatic(input, diagnostics) {
   } else if (exactObject(input.rim, RIM_FIELDS[input.kind], "/rim", diagnostics)) {
     if (input.kind === "idlerPulley") {
       numberRange(input.rim.outerDiameter, 5, 150, "/rim/outerDiameter", diagnostics);
+    } else if (input.kind === "spurGear") {
+      numberRange(input.rim.module, 0.3, 10, "/rim/module", diagnostics);
+      integerRange(input.rim.toothCount, 6, 200, "/rim/toothCount", diagnostics);
+      numberRange(input.rim.pressureAngle, 14.5, 30, "/rim/pressureAngle", diagnostics);
+      numberRange(input.rim.profileShift, -1, 1, "/rim/profileShift", diagnostics);
+      numberRange(input.rim.backlash, 0, 1, "/rim/backlash", diagnostics);
     } else {
       constant(input.rim.profile, "gt2-2mm-experimental-v1", "/rim/profile", diagnostics);
       integerRange(input.rim.toothCount, 14, 120, "/rim/toothCount", diagnostics);
@@ -119,8 +127,11 @@ function validateStatic(input, diagnostics) {
     numberRange(input.rim.radialThickness, 1, 25, "/rim/radialThickness", diagnostics);
   }
   if (exactObject(input.flanges, FLANGES_FIELDS, "/flanges", diagnostics)) {
-    validateFlange(input.flanges.lower, "/flanges/lower", diagnostics);
-    validateFlange(input.flanges.upper, "/flanges/upper", diagnostics);
+    for (const side of FLANGES_FIELDS) {
+      // a flange past the tooth tips would stop the mating gear
+      if (input.kind === "spurGear" && input.flanges[side] !== null) constant(input.flanges[side], null, `/flanges/${side}`, diagnostics);
+      else validateFlange(input.flanges[side], `/flanges/${side}`, diagnostics);
+    }
   }
   if (isRecord(input.web)) {
     const fields = input.web.type === "spokes" ? SPOKE_WEB_FIELDS : SOLID_WEB_FIELDS;
@@ -172,6 +183,15 @@ function validateRelations(input, derived, diagnostics) {
   if (derived.rimInnerRadius <= 0) {
     diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", [rimSizePath(input.kind), "/rim/radialThickness"],
       { rimInnerRadius: derived.rimInnerRadius }));
+  }
+  if (input.kind === "spurGear") {
+    const gear = spurGearGeometry(input.rim);
+    if (gear.thin) {
+      diagnostics.push(diagnostic("E_GEAR_TOOTH_THIN", "error", "description", ["/rim/backlash", "/rim/module", "/rim/profileShift"],
+        { thickness: gear.thickness }));
+    } else if (gear.closed) {
+      diagnostics.push(diagnostic("E_GEAR_ROOT_CLOSED", "error", "description", ["/rim/profileShift", "/rim/toothCount", "/rim/pressureAngle"]));
+    }
   }
   const { bore } = input;
   // the flat must leave the axis inside the bore, or the bore is not a loop around it
@@ -232,11 +252,24 @@ function addWarnings(input, derived, diagnostics) {
   if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
   if (hubWall < THIN_FEATURE) diagnostics.push(thin("/hub/outerDiameter", hubWall));
   if (input.kind === "timingPulley") diagnostics.push(diagnostic("W_EXPERIMENTAL_PROFILE", "warning", "build", ["/rim/profile"]));
+  if (input.kind === "spurGear") {
+    const gear = spurGearGeometry(input.rim);
+    // the limit is rounded as usual: a 20° rack gives the textbook 17 teeth for 17.1, a trace of undercut is harmless
+    const minimum = Math.round(gear.undercutLimit);
+    if (input.rim.toothCount < minimum) {
+      diagnostics.push(diagnostic("W_GEAR_UNDERCUT", "warning", "build", ["/rim/toothCount", "/rim/profileShift"],
+        { minimum, shift: 1 - input.rim.toothCount * Math.sin(input.rim.pressureAngle * Math.PI / 180) ** 2 / 2 }));
+    }
+    if (gear.pointed) {
+      diagnostics.push(diagnostic("W_GEAR_POINTED", "warning", "build", ["/rim/profileShift", "/rim/backlash"],
+        { tipDiameter: 2 * gear.tip, fullTipDiameter: 2 * gear.fullTip }));
+    }
+  }
 }
 
 function derive(input) {
   const radii = rimRadii(input.kind, input.rim);
-  const toothed = input.kind === "timingPulley";
+  const toothed = input.kind !== "idlerPulley";
   const outsideRadius = radii.outside;
   const rimInnerRadius = radii.root - input.rim.radialThickness;
   const boreRadius = input.bore.diameter / 2;
@@ -255,11 +288,13 @@ function derive(input) {
   const lowerFlangeZ = input.flanges.lower ? -halfWidth - input.flanges.lower.axialThickness : -halfWidth;
   const upperFlangeZ = input.flanges.upper ? halfWidth + input.flanges.upper.axialThickness : halfWidth;
   return {
-    pitch: toothed ? 2 : null,
+    // belt pitch of a timing pulley, circular pitch πm of a gear
+    pitch: input.kind === "timingPulley" ? 2 : input.kind === "spurGear" ? Math.PI * input.rim.module : null,
     pitchRadius: radii.pitch,
     outsideRadius,
     rootRadius: radii.root,
-    grooveRootRadius: toothed ? radii.root : null,
+    grooveRootRadius: input.kind === "timingPulley" ? radii.root : null,
+    baseRadius: radii.base,
     rimInnerRadius,
     boreRadius,
     boreOuterRadius: bore.outerRadius,
@@ -295,10 +330,8 @@ function normalize(input) {
   });
   const bore = { shape: input.bore.shape, diameter: input.bore.diameter };
   for (const field of BORE_FIELDS[input.bore.shape].slice(2)) bore[field] = input.bore[field];
-  const rim = input.kind === "idlerPulley"
-    ? { outerDiameter: input.rim.outerDiameter }
-    : { profile: "gt2-2mm-experimental-v1", toothCount: input.rim.toothCount };
-  Object.assign(rim, { width: input.rim.width, radialThickness: input.rim.radialThickness });
+  // every rim field is a checked scalar, the GT2 profile name included
+  const rim = Object.fromEntries(RIM_FIELDS[input.kind].map((field) => [field, input.rim[field]]));
   return {
     schemaVersion: SCHEMA_VERSION,
     kind: input.kind,

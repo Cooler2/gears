@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gears.local/schemas/pulley-v3.schema.json",
   "title": "Gears pulley description, version 3",
-  "description": "Static structure and scalar limits of a GT2 timing pulley or a smooth idler pulley. Cross-field geometry rules are defined in docs/contract.md.",
+  "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley or an involute spur gear. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,11 +19,11 @@
   "properties": {
     "schemaVersion": {
       "const": 3,
-      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only; readers upgrade them."
+      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only; readers upgrade them. Version 3 added the idler pulley and the spur gear."
     },
     "kind": {
-      "enum": ["timingPulley", "idlerPulley"],
-      "description": "Part kind; it selects the rim. Flanges, web, hub and bore are shared."
+      "enum": ["timingPulley", "idlerPulley", "spurGear"],
+      "description": "Part kind; it selects the rim. Flanges (absent on a gear), web, hub and bore are shared."
     },
     "units": {
       "const": "mm",
@@ -32,7 +32,8 @@
     "rim": {
       "oneOf": [
         { "$ref": "#/$defs/timingRim" },
-        { "$ref": "#/$defs/idlerRim" }
+        { "$ref": "#/$defs/idlerRim" },
+        { "$ref": "#/$defs/gearRim" }
       ]
     },
     "flanges": {
@@ -61,9 +62,21 @@
   },
   "allOf": [
     {
+      "if": { "properties": { "kind": { "const": "timingPulley" } } },
+      "then": { "properties": { "rim": { "$ref": "#/$defs/timingRim" } } }
+    },
+    {
       "if": { "properties": { "kind": { "const": "idlerPulley" } } },
-      "then": { "properties": { "rim": { "$ref": "#/$defs/idlerRim" } } },
-      "else": { "properties": { "rim": { "$ref": "#/$defs/timingRim" } } }
+      "then": { "properties": { "rim": { "$ref": "#/$defs/idlerRim" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "spurGear" } } },
+      "then": {
+        "properties": {
+          "rim": { "$ref": "#/$defs/gearRim" },
+          "flanges": { "properties": { "lower": { "type": "null" }, "upper": { "type": "null" } } }
+        }
+      }
     }
   ],
   "$defs": {
@@ -116,6 +129,50 @@
           "maximum": 150,
           "default": 20,
           "description": "Diameter of the smooth cylindrical surface the belt runs on."
+        },
+        "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
+        "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }
+      }
+    },
+    "gearRim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "toothCount", "pressureAngle", "profileShift", "backlash", "width", "radialThickness"],
+      "properties": {
+        "module": {
+          "type": "number",
+          "minimum": 0.3,
+          "maximum": 10,
+          "default": 1,
+          "description": "Module m in mm: pitch diameter is m·toothCount, circular pitch π·m. Mating gears share the module and the pressure angle."
+        },
+        "toothCount": {
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 200,
+          "default": 30,
+          "description": "Number of teeth."
+        },
+        "pressureAngle": {
+          "type": "number",
+          "minimum": 14.5,
+          "maximum": 30,
+          "default": 20,
+          "description": "Pressure angle of the basic rack, degrees."
+        },
+        "profileShift": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "default": 0,
+          "description": "Profile shift coefficient x: the rack moves outwards by x·module; addendum is (1 + x)·module, dedendum (1.25 − x)·module."
+        },
+        "backlash": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "Thinning of every tooth along the pitch circle, mm; a pair at the standard centre distance gets the sum of both gears as play."
         },
         "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
         "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }

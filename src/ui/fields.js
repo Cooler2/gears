@@ -8,7 +8,8 @@
 
 export const KINDS = [
   { id: "timingPulley", title: "Шкив GT2", text: "Зубчатый шкив под ремень GT2 с шагом 2 мм.", experimental: true },
-  { id: "idlerPulley", title: "Гладкий шкив", text: "Ролик без зубьев: натяжитель или обводной ролик ремня." }
+  { id: "idlerPulley", title: "Гладкий шкив", text: "Ролик без зубьев: натяжитель или обводной ролик ремня." },
+  { id: "spurGear", title: "Прямозубая шестерня", text: "Эвольвентные зубья. Шестерни одной пары должны иметь одинаковые модуль и угол давления." }
 ];
 
 export function kindOf(description) {
@@ -16,23 +17,30 @@ export function kindOf(description) {
 }
 
 const isIdler = (description) => description?.kind === "idlerPulley";
+const isGear = (description) => description?.kind === "spurGear";
 
 /** Words for the rim of the kind: a toothed rim ("венец", "зубчатая часть") or a smooth one ("обод"). */
 function rimWords(description) {
-  return isIdler(description)
-    ? { body: "обод", bodyOf: "обода", part: "обод", partOf: "обода", surface: "поверхности обода" }
-    : { body: "венец", bodyOf: "венца", part: "зубчатая часть", partOf: "зубчатой части", surface: "вершин зубьев" };
+  if (isIdler(description)) return { body: "обод", bodyOf: "обода", part: "обод", partOf: "обода", surface: "поверхности обода" };
+  if (isGear(description)) return { body: "венец", bodyOf: "венца", part: "венец", partOf: "венца", surface: "вершин зубьев" };
+  return { body: "венец", bodyOf: "венца", part: "зубчатая часть", partOf: "зубчатой части", surface: "вершин зубьев" };
 }
 
 export const GROUPS = [
   { id: "presets", title: "Варианты" },
-  { id: "rim", title: (description) => isIdler(description) ? "Ремень и обод" : "Ремень и зубья" },
-  { id: "flanges", title: "Фланцы" },
+  { id: "rim", title: (description) => isIdler(description) ? "Ремень и обод" : isGear(description) ? "Зубья" : "Ремень и зубья" },
+  // flanges past the tooth tips would stop the mating gear
+  { id: "flanges", title: "Фланцы", applies: (description) => !isGear(description) },
   { id: "web", title: "Полотно и спицы" },
   { id: "hub", title: "Втулка" },
   { id: "bore", title: "Отверстие под вал" },
   { id: "generation", title: "Точность модели" }
 ];
+
+/** Groups of the kind, the variants page included. */
+export function groupsOf(description) {
+  return GROUPS.filter((group) => !group.applies || group.applies(description));
+}
 
 export function groupTitle(group, description) {
   return typeof group.title === "function" ? group.title(description) : group.title;
@@ -44,9 +52,32 @@ const hasFlange = (side) => (description) => Boolean(description.flanges?.[side]
 
 export const FIELDS = [
   {
-    path: "/rim/toothCount", group: "rim", schema: ["timingRim", "toothCount"], applies: (description) => !isIdler(description),
+    path: "/rim/module", group: "rim", schema: ["gearRim", "module"], applies: isGear,
+    label: "Модуль", symbol: "m", unit: "мм",
+    hint: "Размер зуба: шаг по делительной окружности равен πm, делительный диаметр — mN. Шестерни одной пары должны иметь одинаковый модуль."
+  },
+  {
+    path: "/rim/toothCount", group: "rim", schema: (description) => [isGear(description) ? "gearRim" : "timingRim", "toothCount"],
+    applies: (description) => !isIdler(description),
     label: "Число зубьев", symbol: "N",
-    hint: "Число канавок под зубья ремня GT2 с шагом 2 мм. Делительный диаметр равен 2N/π."
+    hint: (description) => isGear(description)
+      ? "Передаточное число пары равно отношению чисел зубьев."
+      : "Число канавок под зубья ремня GT2 с шагом 2 мм. Делительный диаметр равен 2N/π."
+  },
+  {
+    path: "/rim/pressureAngle", group: "rim", schema: ["gearRim", "pressureAngle"], applies: isGear,
+    label: "Угол давления", symbol: "α", unit: "°",
+    hint: "Наклон боковых сторон зуба в точке на делительной окружности. Стандарт — 20°; у пары он должен совпадать."
+  },
+  {
+    path: "/rim/profileShift", group: "rim", schema: ["gearRim", "profileShift"], applies: isGear,
+    label: "Коэффициент смещения", symbol: "x",
+    hint: "Сдвигает зуб наружу на xm: он становится толще у основания и острее у вершины. Положительное смещение убирает подрезание у шестерни с малым числом зубьев."
+  },
+  {
+    path: "/rim/backlash", group: "rim", schema: ["gearRim", "backlash"], applies: isGear,
+    label: "Утонение зуба", symbol: "j", unit: "мм",
+    hint: "На столько зуб тоньше расчётного по делительной окружности, поровну с каждой стороны. Зазор в паре равен сумме утонений обеих шестерён; для печати обычно 0,1–0,2 мм."
   },
   {
     path: "/rim/outerDiameter", group: "rim", schema: ["idlerRim", "outerDiameter"], applies: isIdler,
@@ -55,15 +86,17 @@ export const FIELDS = [
   },
   {
     path: "/rim/width", group: "rim", schema: ["rimPlacement", "width"],
-    label: (description) => isIdler(description) ? "Ширина обода" : "Ширина зубчатой части", symbol: "W", unit: "мм",
-    hint: "Обычно на 0,5–1 мм шире ремня. Фланцы и выступы втулки в неё не входят."
+    label: (description) => isIdler(description) ? "Ширина обода" : isGear(description) ? "Ширина венца" : "Ширина зубчатой части", symbol: "W", unit: "мм",
+    hint: (description) => isGear(description)
+      ? "Длина зуба вдоль оси. Выступы втулки в неё не входят."
+      : "Обычно на 0,5–1 мм шире ремня. Фланцы и выступы втулки в неё не входят."
   },
   {
     path: "/rim/radialThickness", group: "rim", schema: ["rimPlacement", "radialThickness"],
     label: (description) => `Толщина ${rimWords(description).bodyOf}`, symbol: "T_r", unit: "мм",
     hint: (description) => isIdler(description)
       ? "Кольцо материала под поверхностью обода, внутрь до полотна или спиц."
-      : "Кольцо материала под зубьями: от дна канавок внутрь до полотна или спиц."
+      : `Кольцо материала под зубьями: от ${isGear(description) ? "окружности впадин" : "дна канавок"} внутрь до полотна или спиц.`
   },
   {
     path: "/flanges/lower", group: "flanges", kind: "toggle",
@@ -126,7 +159,7 @@ export const FIELDS = [
   {
     path: "/web/filletRadius", group: "web", schema: ["spokeWeb", "filletRadius"], applies: isSpokes,
     label: "Радиус скруглений", symbol: "R_f", unit: "мм",
-    hint: "Плавный переход спицы во втулку и в венец. Не больше половины ширины спицы."
+    hint: (description) => `Плавный переход спицы во втулку и в ${rimWords(description).body}. Не больше половины ширины спицы.`
   },
   {
     path: "/hub/outerDiameter", group: "hub", schema: ["hub", "outerDiameter"],
@@ -206,9 +239,9 @@ export function fieldsOf(group, description) {
   return FIELDS.filter((field) => field.group === group && isApplicable(field, description));
 }
 
-/** Limits and defaults of a numeric field, straight from the JSON Schema. */
-export function fieldSchema(schema, field) {
-  const [definition, property] = field.schema;
+/** Limits and defaults of a numeric field, straight from the JSON Schema; they may depend on the kind. */
+export function fieldSchema(schema, field, description) {
+  const [definition, property] = typeof field.schema === "function" ? field.schema(description) : field.schema;
   const node = schema.$defs[definition].properties[property];
   return { minimum: node.minimum, maximum: node.maximum, integer: node.type === "integer", default: node.default };
 }

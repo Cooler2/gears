@@ -4,11 +4,12 @@ import { formatNumber as n } from "./format.js";
 
 const TEXTS = {
   E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion от 1 до 3.",
-  E_SCHEMA_VALUE: ({ rule, minimum, maximum }) => {
+  E_SCHEMA_VALUE: ({ rule, minimum, maximum, expected }) => {
     if (rule === "numberRange") return `Нужно число от ${n(minimum)} до ${n(maximum)}.`;
     if (rule === "integerRange") return `Нужно целое число от ${minimum} до ${maximum}.`;
     if (rule === "additionalProperty") return "Лишнее поле, в формате его нет.";
     if (rule === "required") return "Не хватает обязательного поля.";
+    if (rule === "const" && expected === "null") return "У шестерни нет фланцев: они не пустили бы ответную шестерню.";
     return "Значение не подходит формату.";
   },
   E_RIM_NO_INTERIOR: ({ rimInnerRadius }, smooth) => (smooth ? "Обод слишком толстый для такого диаметра" : "Венец слишком толстый для такого числа зубьев") +
@@ -35,6 +36,16 @@ const TEXTS = {
   E_SPOKE_OVERLAP: ({ required, available }) =>
     `Спицы со скруглениями не помещаются у втулки: каждой нужно ${n(required)} мм по окружности втулки, а есть ${n(available)} мм. ` +
     "Уменьшите число спиц, их ширину или скругления либо увеличьте втулку.",
+  E_GEAR_TOOTH_THIN: ({ thickness }) =>
+    `Зуб получается без материала: по делительной окружности он был бы толщиной ${n(thickness)} мм. ` +
+    "Уменьшите утонение зуба или возьмите больше модуль либо коэффициент смещения.",
+  E_GEAR_ROOT_CLOSED: () =>
+    "Соседние зубья смыкаются у основания, впадины между ними не остаётся. Уменьшите коэффициент смещения или угол давления либо возьмите больше зубьев.",
+  W_GEAR_UNDERCUT: ({ minimum, shift }) =>
+    `Меньше ${minimum} зубьев: у настоящей шестерни ножка зуба была бы подрезана, здесь она построена без подреза и может задевать вершины ответной шестерни. ` +
+    `Возьмите не меньше ${minimum} зубьев или коэффициент смещения от ${n(Math.ceil(shift * 100) / 100)}.`,
+  W_GEAR_POINTED: ({ tipDiameter, fullTipDiameter }) =>
+    `Зубья заострены: вершины срезаны до диаметра ${n(tipDiameter)} мм вместо ${n(fullTipDiameter)} мм. Уменьшите коэффициент смещения или утонение зуба.`,
   W_THIN_FEATURE: ({ value, recommended }) =>
     `Тоньше ${n(recommended)} мм (сейчас ${n(value)} мм): модель построится, но проверьте, пропечатается ли такая стенка.`,
   W_EXPERIMENTAL_PROFILE: () =>

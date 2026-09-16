@@ -65,7 +65,8 @@ async function buildEntry(group, file) {
     dimensions: {
       toothCount: normalized.rim.toothCount,
       outsideDiameter: 2 * derived.outsideRadius,
-      grooveRootDiameter: 2 * derived.grooveRootRadius,
+      grooveRootDiameter: derived.grooveRootRadius === null ? null : 2 * derived.grooveRootRadius,
+      module: normalized.rim.module ?? null,
       boreShape: normalized.bore.shape,
       boreDiameter: normalized.bore.diameter,
       hubDiameter: normalized.hub.outerDiameter,

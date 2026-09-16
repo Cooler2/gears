@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildPlanView, generatePulley, validateDescription, verifyMesh } from "../src/core/generate.js";
 import { buildCircleContour, buildGt2Contour, circleSegmentCount } from "../src/core/contours.js";
+import { rimSurface } from "../src/core/rims.js";
 import { exportBinaryStl } from "../src/export/stl.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
@@ -133,6 +134,8 @@ test("cross-field invalid examples return their documented diagnostics", async (
     "spoke-overlap.json": "E_SPOKE_OVERLAP",
     "spoke-fillet.json": "E_SPOKE_FILLET",
     "idler-no-interior.json": "E_RIM_NO_INTERIOR",
+    "gear-thin-tooth.json": "E_GEAR_TOOTH_THIN",
+    "gear-flange.json": "E_SCHEMA_VALUE",
     "schema-extra-field.json": "E_SCHEMA_VALUE"
   };
   assert.deepEqual(await exampleNames("invalid"), Object.keys(cases).sort(), "every invalid example needs an expected code");
@@ -236,6 +239,87 @@ test("an idler pulley has a smooth rim of its diameter and shares the rest", asy
   const noInterior = validateDescription(await readJson("../examples/invalid/idler-no-interior.json")).diagnostics;
   assert.deepEqual(noInterior.find(({ code }) => code === "E_RIM_NO_INTERIOR").paths, ["/rim/outerDiameter", "/rim/radialThickness"]);
   assert.ok(noInterior.find(({ code }) => code === "E_RADIAL_ORDER").paths.includes("/rim/outerDiameter"));
+});
+
+test("a spur gear has involute teeth of the standard rack sizes", async () => {
+  const input = await readJson("../examples/valid/gear-30t.json");
+  const result = generatePulley(input);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  assert.deepEqual(result.diagnostics, []);
+  const { derived, anchors } = result;
+  const { module: m, toothCount: n, backlash } = input.rim;
+  const alpha = input.rim.pressureAngle * Math.PI / 180;
+  const pitchRadius = m * n / 2;
+  const baseRadius = pitchRadius * Math.cos(alpha);
+  assert.equal(derived.pitchRadius, 15);
+  assert.equal(derived.outsideRadius, 16);
+  assert.equal(derived.rootRadius, 13.75);
+  assert.ok(Math.abs(derived.baseRadius - baseRadius) < 1e-12);
+  assert.equal(derived.rimInnerRadius, 11.75);
+  assert.equal(derived.pitch, Math.PI);
+  assert.equal(anchors.radii.pitch, 15);
+  assert.equal(result.mesh.bounds.max[1], 16, "the tooth on +Y reaches the tip circle");
+
+  // the outline, independently: a flank vertex above the base circle lies on the involute
+  // whose tooth is m·π/2 − backlash thick along the pitch circle
+  const involute = (angle) => Math.tan(angle) - angle;
+  const halfAngle = (r) => (m * Math.PI / 2 - backlash) / (2 * pitchRadius) + involute(alpha) - involute(Math.acos(baseRadius / r));
+  const outline = buildPlanView(result.normalized, derived).profile;
+  const pitchAngle = 2 * Math.PI / n;
+  let previous = -Infinity;
+  let flankVertices = 0;
+  for (const [x, y] of outline) {
+    const r = Math.hypot(x, y);
+    const angle = (Math.atan2(x, y) + 2 * Math.PI + 1e-12) % (2 * Math.PI);
+    assert.ok(angle >= previous - 1e-12, "the outline turns clockwise without going back");
+    previous = angle;
+    assert.ok(r > 13.75 - 1e-9 && r < 16 + 1e-9, `r = ${r}`);
+    if (r < 13.75 + 1e-9 || r > 16 - 1e-9) continue;
+    // angle from the nearest tooth centre
+    const fromTooth = Math.abs(angle - pitchAngle * Math.round(angle / pitchAngle));
+    const expected = r >= baseRadius ? halfAngle(r) : halfAngle(baseRadius);
+    assert.ok(Math.abs(fromTooth - expected) < 1e-9, `flank at r = ${r}: ${fromTooth} vs ${expected}`);
+    flankVertices += 1;
+  }
+  assert.ok(flankVertices >= 4 * n, "every flank has vertices between root and tip");
+
+  // between neighbouring flank vertices the exact involute stays within the chord tolerance
+  for (const [rim, maxChordError] of [[input.rim, 0.25], [input.rim, 0.01], [{ ...input.rim, module: 5, toothCount: 12, profileShift: 0.5 }, 0.01]]) {
+    const gear = { m: rim.module, alpha: rim.pressureAngle * Math.PI / 180 };
+    const rp = rim.module * rim.toothCount / 2;
+    const rb = rp * Math.cos(gear.alpha);
+    const half = (r) => (rim.module * (Math.PI / 2 + 2 * rim.profileShift * Math.tan(gear.alpha)) - rim.backlash) / (2 * rp) + involute(gear.alpha) - involute(Math.acos(rb / r));
+    const tip = rp + rim.module * (1 + rim.profileShift);
+    const start = Math.max(rb, rp - rim.module * (1.25 - rim.profileShift));
+    const flank = rimSurface("spurGear", rim, null, maxChordError).points
+      .map(([x, y]) => [Math.hypot(x, y), Math.atan2(x, y)])
+      .filter(([r, angle]) => angle > 0 && angle < Math.PI / rim.toothCount && r >= start - 1e-9 && r <= tip + 1e-9 && Math.abs(angle - half(Math.max(r, rb))) < 1e-9);
+    let worst = 0;
+    for (let index = 1; index < flank.length; index += 1) {
+      const [a, b] = [flank[index - 1], flank[index]].map(([r, angle]) => [r * Math.sin(angle), r * Math.cos(angle)]);
+      const [ra, rb2] = [flank[index - 1][0], flank[index][0]];
+      for (let k = 1; k < 8; k += 1) {
+        const r = rb2 + (ra - rb2) * k / 8;
+        const exact = [r * Math.sin(half(r)), r * Math.cos(half(r))];
+        const cross = Math.abs((b[0] - a[0]) * (exact[1] - a[1]) - (b[1] - a[1]) * (exact[0] - a[0])) / Math.hypot(b[0] - a[0], b[1] - a[1]);
+        worst = Math.max(worst, cross);
+      }
+    }
+    assert.ok(flank.length >= 3, `m ${rim.module} ε ${maxChordError}: ${flank.length} flank vertices`);
+    assert.ok(worst <= maxChordError, `m ${rim.module} ε ${maxChordError}: involute off the chord by ${worst}`);
+  }
+
+  // a smaller hub leaves room for the web of a 16-tooth gear
+  const codes = (rim) => validateDescription({ ...input, hub: { ...input.hub, outerDiameter: 8 }, rim: { ...input.rim, ...rim } }).diagnostics.map(({ code }) => code);
+  // 17 teeth are the fewest a 20° rack does not undercut; a shift lowers the limit
+  assert.deepEqual(codes({ toothCount: 16 }), ["W_GEAR_UNDERCUT"]);
+  assert.deepEqual(codes({ toothCount: 17 }), []);
+  assert.deepEqual(codes({ toothCount: 16, profileShift: 0.1 }), []);
+  assert.ok(codes({ toothCount: 10, profileShift: 1 }).includes("W_GEAR_POINTED"));
+  const thin = validateDescription(await readJson("../examples/invalid/gear-thin-tooth.json")).diagnostics;
+  assert.deepEqual(thin.find(({ code }) => code === "E_GEAR_TOOTH_THIN").paths, ["/rim/backlash", "/rim/module", "/rim/profileShift"]);
+  const flanged = validateDescription(await readJson("../examples/invalid/gear-flange.json")).diagnostics;
+  assert.deepEqual(flanged.map(({ paths }) => paths[0]), ["/flanges/lower"]);
 });
 
 test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
@@ -351,13 +435,14 @@ test("every valid example builds a closed solid of the expected size", async () 
     const input = await readJson(`../examples/valid/${name}`);
     const result = generatePulley(input);
     const toothed = input.kind === "timingPulley";
+    const gear = input.kind === "spurGear";
     assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
     assert.deepEqual(result.verification.errors, [], name);
     assert.deepEqual(result.diagnostics.map(({ code }) => code), [...(extraWarnings[name] ?? []), ...(toothed ? ["W_EXPERIMENTAL_PROFILE"] : [])], name);
 
     // sizes straight from the contract formulas, not from derive()
     const { rim, flanges, hub } = input;
-    const outsideRadius = toothed ? rim.toothCount / Math.PI - 0.254 : rim.outerDiameter / 2;
+    const outsideRadius = toothed ? rim.toothCount / Math.PI - 0.254 : gear ? rim.module * (rim.toothCount / 2 + 1 + rim.profileShift) : rim.outerDiameter / 2;
     // a smooth circle need not have a vertex on the X axis: it may fall short by the chord tolerance
     const tolerance = toothed ? 1e-9 : input.generation.maxChordError;
     const flangeRadii = [flanges.lower, flanges.upper].filter(Boolean).map((flange) => outsideRadius + flange.radialExtension);
@@ -365,7 +450,9 @@ test("every valid example builds a closed solid of the expected size", async () 
     const bottom = -rim.width / 2 - Math.max(hub.lowerExtension, flanges.lower?.axialThickness ?? 0);
     const top = rim.width / 2 + Math.max(hub.upperExtension, flanges.upper?.axialThickness ?? 0);
     const { min, max } = result.mesh.bounds;
-    assert.ok(Math.abs(max[0] - radius) < tolerance && Math.abs(min[0] + radius) < tolerance, `${name}: radius ${max[0]} vs ${radius}`);
+    // a gear has a tooth tip on +Y, not necessarily on the X axis
+    if (gear) assert.ok(Math.abs(max[1] - radius) < 1e-9 && max[0] <= radius && -min[0] <= radius, `${name}: radius ${max[1]} vs ${radius}`);
+    else assert.ok(Math.abs(max[0] - radius) < tolerance && Math.abs(min[0] + radius) < tolerance, `${name}: radius ${max[0]} vs ${radius}`);
     assert.ok(Math.abs(min[2] - bottom) < 1e-12 && Math.abs(max[2] - top) < 1e-12, `${name}: height`);
   }
 });
