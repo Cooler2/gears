@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "kind": "idlerPulley",
+  "units": "mm",
+  "rim": {
+    "outerDiameter": 40,
+    "width": 10,
+    "radialThickness": 2
+  },
+  "flanges": {
+    "lower": {
+      "axialThickness": 1.2,
+      "radialExtension": 2
+    },
+    "upper": null
+  },
+  "web": {
+    "type": "spokes",
+    "axialThickness": 3,
+    "axialOffset": -3.5,
+    "count": 5,
+    "width": 3,
+    "filletRadius": 1.5
+  },
+  "hub": {
+    "outerDiameter": 12,
+    "lowerExtension": 0,
+    "upperExtension": 2
+  },
+  "bore": { "shape": "round", "diameter": 5 },
+  "generation": {
+    "maxChordError": 0.05
+  }
+}

@@ -128,7 +128,8 @@ export function renderPlan(model, ctx) {
     if (radius) out.push(part(ctx, "flanges", circlePath(radius), { path: `/flanges/${side}`, extra: "part-beyond" }));
   }
   const rimInner = Math.max(r.rimInner, 0);
-  out.push(part(ctx, "rim", polygonPath(plan.profile) + (rimInner > 0 ? circlePath(rimInner) : "")));
+  const surface = plan.profile ? polygonPath(plan.profile) : circlePath(r.outside);
+  out.push(part(ctx, "rim", surface + (rimInner > 0 ? circlePath(rimInner) : "")));
   if (plan.spokes) {
     const outlines = plan.spokes.outlines.map(polygonPath).join("");
     if (outlines) out.push(part(ctx, "web", outlines, { path: "/web/type", extra: plan.spokes.schematic ? "part-schematic" : "" }));
@@ -141,23 +142,34 @@ export function renderPlan(model, ctx) {
     out.splice(0, out.length, `<g class="detail" clip-path="url(#plan-detail)">${out.join("")}</g>`, `<path class="detail-edge" d="${circlePath(detail)}"/>`);
   }
   out.push(`<path class="centre-line" d="M${P([-outer - u, 0])}L${P([outer + u, 0])}M${P([0, -outer - u])}L${P([0, outer + u])}"/>`);
-  if (!detail) out.push(`<path class="pitch-line" d="${circlePath(r.pitch)}"/>`);
+  if (!detail && r.pitch) out.push(`<path class="pitch-line" d="${circlePath(r.pitch)}"/>`);
 
   const { rim, web, hub } = normalized;
   const labelRadius = outer + 0.9 * u;
+  const toothed = Boolean(plan.profile);
 
-  // N: a dot on every groove, the label above the pulley
-  const dots = Array.from({ length: rim.toothCount }, (_, k) => polar(outer + 0.5 * u, 2 * Math.PI * k / rim.toothCount));
-  out.push(wrap(ctx, "/rim/toothCount", rim.toothCount,
-    dots.map((point) => `<path class="dim-dot" d="${circlePath(0.13 * u, point)}"/>`).join("") +
-    labelMarkup("/rim/toothCount", rim.toothCount, [0, outer + 1.4 * u], "middle")));
+  if (toothed) {
+    // N: a dot on every groove, the label above the pulley
+    const dots = Array.from({ length: rim.toothCount }, (_, k) => polar(outer + 0.5 * u, 2 * Math.PI * k / rim.toothCount));
+    out.push(wrap(ctx, "/rim/toothCount", rim.toothCount,
+      dots.map((point) => `<path class="dim-dot" d="${circlePath(0.13 * u, point)}"/>`).join("") +
+      labelMarkup("/rim/toothCount", rim.toothCount, [0, outer + 1.4 * u], "middle")));
+  } else {
+    // D across the upper right diagonal, the label led outside
+    const direction = polar(1, Math.PI / 4);
+    out.push(dimension(ctx, "/rim/outerDiameter", {
+      u, a: mul(direction, -r.outside), b: mul(direction, r.outside), value: rim.outerDiameter,
+      leader: [mul(direction, r.outside), mul(direction, labelRadius)],
+      label: add(mul(direction, labelRadius), [0.3 * u, 0]), anchor: "start"
+    }));
+  }
 
-  // T_r along the groove closest to the lower right
-  const grooveIndex = Math.round(rim.toothCount * 3 / 8);
-  const rimDirection = polar(1, 2 * Math.PI * grooveIndex / rim.toothCount);
+  // T_r to the lower right, along a groove of a toothed rim
+  const rimAngle = toothed ? 2 * Math.PI * Math.round(rim.toothCount * 3 / 8) / rim.toothCount : 3 * Math.PI / 4;
+  const rimDirection = polar(1, rimAngle);
   out.push(dimension(ctx, "/rim/radialThickness", {
-    u, a: mul(rimDirection, rimInner), b: mul(rimDirection, r.grooveRoot), value: rim.radialThickness,
-    leader: [mul(rimDirection, r.grooveRoot + 1.2 * u), mul(rimDirection, labelRadius)],
+    u, a: mul(rimDirection, rimInner), b: mul(rimDirection, r.root), value: rim.radialThickness,
+    leader: [mul(rimDirection, r.root + 1.2 * u), mul(rimDirection, labelRadius)],
     label: add(mul(rimDirection, labelRadius), [0.3 * u, 0]), anchor: "start"
   }));
 
@@ -286,8 +298,8 @@ export function renderSection(model, ctx) {
   const rects = { rim: [], teeth: [], flanges: { lower: [], upper: [] }, web: [], hub: [] };
   for (const side of [1, -1]) {
     const box = (x0, z0, x1, z1) => rectPath(side * x0, z0, side * x1, z1);
-    rects.teeth.push(box(r.grooveRoot, z.rimLower, r.outside, z.rimUpper));
-    rects.rim.push(box(rimInner, z.rimLower, r.grooveRoot, z.rimUpper));
+    if (r.root < r.outside) rects.teeth.push(box(r.root, z.rimLower, r.outside, z.rimUpper));
+    rects.rim.push(box(rimInner, z.rimLower, r.root, z.rimUpper));
     if (z.lowerFlange !== null) rects.flanges.lower.push(box(rimInner, z.lowerFlange, flangeRadius.lower, z.rimLower));
     if (z.upperFlange !== null) rects.flanges.upper.push(box(rimInner, z.rimUpper, flangeRadius.upper, z.upperFlange));
     if (rimInner > r.hub) rects.web.push(box(r.hub, z.webLower, rimInner, z.webUpper));
@@ -297,7 +309,7 @@ export function renderSection(model, ctx) {
   }
 
   const out = [];
-  out.push(part(ctx, "rim", rects.teeth.join(""), { extra: "part-teeth" }));
+  if (rects.teeth.length) out.push(part(ctx, "rim", rects.teeth.join(""), { extra: "part-teeth" }));
   out.push(part(ctx, "rim", rects.rim.join("")));
   for (const side of ["lower", "upper"]) {
     if (rects.flanges[side].length) out.push(part(ctx, "flanges", rects.flanges[side].join(""), { path: `/flanges/${side}` }));
@@ -312,11 +324,11 @@ export function renderSection(model, ctx) {
 
   const { rim, flanges, web, hub, bore } = normalized;
 
-  // right column: lower flange, toothed width, upper flange as a chain
+  // right column: lower flange, rim width, upper flange as a chain
   const column = outer + 1.5 * u;
   const chain = [
     ["/flanges/lower/axialThickness", z.lowerFlange, z.rimLower, flanges.lower?.axialThickness, flangeRadius.lower, r.outside],
-    ["/rim/toothedWidth", z.rimLower, z.rimUpper, rim.toothedWidth, r.outside, r.outside],
+    ["/rim/width", z.rimLower, z.rimUpper, rim.width, r.outside, r.outside],
     ["/flanges/upper/axialThickness", z.rimUpper, z.upperFlange, flanges.upper?.axialThickness, r.outside, flangeRadius.upper]
   ];
   for (const [path, z0, z1, value, x0, x1] of chain) {
@@ -339,22 +351,23 @@ export function renderSection(model, ctx) {
     }));
   }
 
-  // hub and bore sizes across the part, above it, values centred over their lines;
+  // rim, hub and bore sizes across the part, above it, values centred over their lines;
   // they belong to different groups and never show together. The section shows
   // the bore sizes that lie in its plane: d of a round bore and s of a flat.
   const across = [["/hub/outerDiameter", -r.hub, r.hub, hub.outerDiameter]];
+  if (!(r.root < r.outside)) across.push(["/rim/outerDiameter", -r.outside, r.outside, rim.outerDiameter]);
   if (bore.shape === "round") across.push(["/bore/diameter", -r.bore, r.bore, bore.diameter]);
   if (bore.shape === "dFlat") across.push(["/bore/flatDistance", -r.bore, bore.flatDistance - r.bore, bore.flatDistance]);
   const acrossLevel = top + 1.4 * u;
   for (const [path, x0, x1, value] of across) {
     out.push(dimension(ctx, path, {
       u, a: [x0, acrossLevel], b: [x1, acrossLevel], value,
-      ext: [[[x0, z.upperHub + 0.3 * u], [x0, acrossLevel + 0.4 * u]], [[x1, z.upperHub + 0.3 * u], [x1, acrossLevel + 0.4 * u]]],
+      ext: [[[x0, (path.startsWith("/rim") ? z.rimUpper : z.upperHub) + 0.3 * u], [x0, acrossLevel + 0.4 * u]], [[x1, (path.startsWith("/rim") ? z.rimUpper : z.upperHub) + 0.3 * u], [x1, acrossLevel + 0.4 * u]]],
       label: [(x0 + x1) / 2, acrossLevel + 0.65 * u], anchor: "middle"
     }));
   }
 
-  // hub extensions: left column, measured from the toothed rim faces
+  // hub extensions: left column, measured from the rim faces
   const left = -outer - 1.5 * u;
   for (const [path, z0, z1, value] of [["/hub/lowerExtension", z.lowerHub, z.rimLower, hub.lowerExtension], ["/hub/upperExtension", z.rimUpper, z.upperHub, hub.upperExtension]]) {
     out.push(dimension(ctx, path, {
@@ -427,6 +440,7 @@ export function chordSummary(model) {
   return [
     model.normalized.bore.shape === "polygon" ? null : ["отверстие", r.bore],
     ["втулка", r.hub],
+    model.normalized.kind === "idlerPulley" ? ["обод", r.outside] : null,
     flange > 0 ? ["фланец", flange] : null
   ].filter(Boolean).filter(([, radius]) => radius > 0)
     .map(([name, radius]) => ({ name, diameter: 2 * radius, segments: circleSegmentCount(radius, epsilon) }));

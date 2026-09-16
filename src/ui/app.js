@@ -12,11 +12,11 @@ import { buildPlanView, validateDescription } from "../core/generate.js";
 import { exportBinaryStl } from "../export/stl.js";
 import { BuildClient } from "../worker/client.js";
 import { chordSummary, renderChord, renderPlan, renderSection } from "./drawings.js";
-import { FIELD_BY_PATH, GROUPS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath } from "./fields.js";
+import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupTitle, kindOf } from "./fields.js";
 import { escapeHtml, formatNumber, inputText, plural, symbolHtml } from "./format.js";
 import { diagnosticKind, diagnosticText } from "./messages.js";
 import { PRESETS } from "./presets.js";
-import { createState, getValue, loadDescription, parseNumber, restoreState as upgradeState, setBoreShape, setFlange, setValue, setWebType } from "./state.js";
+import { createState, defaultDescription, getValue, keepShaft, loadDescription, parseNumber, restoreState as upgradeState, setBoreShape, setFlange, setValue, setWebType } from "./state.js";
 import { MeshViewer } from "./viewer.js";
 
 const STORAGE_KEY = "gears.pulley.form.v1";
@@ -32,12 +32,13 @@ const el = {
   chordFigure: $("#chord-figure"), chord: $("#chord"), planFigure: $("#plan-figure"), sectionFigure: $("#section-figure"),
   stale: $("#stale"), file: $("#file-input"), notice: $("#notice"),
   viewport: $("#viewport"), canvas: $("#viewer"), previewState: $("#preview-state"), overlay: $("#preview-overlay"),
-  previewInfo: $("#preview-info"), retry: $("#retry"), stl: $("#download-stl")
+  previewInfo: $("#preview-info"), retry: $("#retry"), stl: $("#download-stl"),
+  partTitle: $("#part-title"), profileBadge: $("#profile-badge")
 };
 
 let schema, presets;
 try {
-  schema = await fetchJson("../../schemas/pulley-v2.schema.json");
+  schema = await fetchJson("../../schemas/pulley-v3.schema.json");
   presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(`../../examples/valid/${preset.file}`) })));
 } catch (error) {
   $("#boot").className = "notice notice-error";
@@ -48,7 +49,7 @@ $("#boot").hidden = true;
 
 let state = restoreState() ?? createState(schema);
 // the page opens on the variants; a bookmarked group or field opens the editor directly
-const view = { group: "presets", focus: null, ...readHash() };
+const view = { group: "presets", focus: null, keepShaft: false, ...readHash() };
 let validation = null; // core answer for the current description
 let result = null; // the same with build failures of the current description added
 let currentKey = null;
@@ -144,10 +145,18 @@ function writeHash() {
 function renderAll() {
   // the variants take the whole page: drawings and the preview belong to the editor
   document.body.dataset.page = view.group === "presets" ? "presets" : "editor";
+  renderHeader();
   renderNav();
   renderForm();
   renderMessages();
   renderDrawings();
+}
+
+function renderHeader() {
+  const kind = kindOf(state.description);
+  el.partTitle.textContent = kind.title;
+  el.profileBadge.hidden = !kind.experimental;
+  document.title = `${kind.title} — генератор`;
 }
 
 /** Diagnostics without the permanent profile warning, which lives in the header. */
@@ -164,7 +173,9 @@ function renderNav() {
       counts.set(group, entry);
     }
   }
-  el.nav.innerHTML = GROUPS.map(({ id, title }) => {
+  el.nav.innerHTML = GROUPS.map((group) => {
+    const { id } = group;
+    const title = groupTitle(group, state.description);
     const count = counts.get(id);
     const badge = count?.error ? `<span class="badge badge-error" aria-label="ошибок: ${count.error}">${count.error}</span>`
       : count?.other ? `<span class="badge badge-advice" aria-label="рекомендаций: ${count.other}">!</span>` : "";
@@ -174,7 +185,7 @@ function renderNav() {
 
 function renderForm() {
   const group = GROUPS.find(({ id }) => id === view.group);
-  el.title.textContent = group.title;
+  el.title.textContent = groupTitle(group, state.description);
   if (view.group === "presets") {
     el.form.innerHTML = presetCards();
     return;
@@ -233,9 +244,11 @@ function computedMarkup() {
   if (!model) return "";
   const { derived, anchors } = model;
   const rows = {
-    rim: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]],
+    rim: derived.pitchRadius === null
+      ? [["Внутренний диаметр обода", 2 * derived.rimInnerRadius]]
+      : [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", 2 * derived.rimInnerRadius]],
     flanges: [["Диаметр нижнего фланца", derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], ["Диаметр верхнего фланца", derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], ["Полная высота детали", derived.bounds.max[2] - derived.bounds.min[2]]],
-    web: [["Промежуток между втулкой и венцом", anchors.radii.rimInner - anchors.radii.hub], ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
+    web: [[`Промежуток между втулкой и ${derived.pitchRadius === null ? "ободом" : "венцом"}`, anchors.radii.rimInner - anchors.radii.hub], ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
     hub: [["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius], ["Втулка по высоте, от", derived.hubLowerZ], ["до", derived.hubUpperZ]],
     bore: boreRows(model),
     generation: []
@@ -257,16 +270,23 @@ function boreRows({ normalized: { bore }, derived }) {
   ].filter(Boolean);
 }
 
+/** The variants page: continue with the current part, or start a new one of any kind. */
 function presetCards() {
-  const current = `<button type="button" class="preset preset-current" data-continue>
-    <span class="preset-thumb" aria-hidden="true">${thumbnailOf(state.description)}</span>
-    <span class="preset-title">Текущие параметры</span>
-    <span class="preset-text">Продолжить настройку с того места, где вы остановились.</span></button>`;
+  const card = (attributes, className, description, title, text) => `<button type="button" class="preset ${className}" ${attributes}>
+    <span class="preset-thumb" aria-hidden="true">${thumbnailOf(description)}</span>
+    <span class="preset-title">${escapeHtml(title)}</span>
+    <span class="preset-text">${escapeHtml(text)}</span></button>`;
+  const current = card("data-continue", "preset-current", state.description, "Текущие параметры",
+    `${kindOf(state.description).title}. Продолжить настройку с того места, где вы остановились.`);
+  const sections = KINDS.map((kind) => `<h3 class="preset-kind">${escapeHtml(kind.title)}</h3>
+    <p class="lead">${escapeHtml(kind.text)}</p>
+    <div class="presets">${card(`data-new="${kind.id}"`, "preset-new", defaultDescription(schema, kind.id), "Новый", "Все размеры по умолчанию.")}${
+      presets.map((preset, index) => preset.description.kind === kind.id
+        ? card(`data-preset="${index}"`, "", preset.description, preset.title, preset.text) : "").join("")}</div>`).join("");
   return `<p class="lead">Начните с готового варианта: он заменит текущие параметры, дальше их можно менять в любом разделе. Или продолжите с текущими.</p>
-    <div class="presets">${current}${presets.map((preset, index) => `<button type="button" class="preset" data-preset="${index}">
-        <span class="preset-thumb" aria-hidden="true">${thumbnailOf(preset.description)}</span>
-        <span class="preset-title">${escapeHtml(preset.title)}</span>
-        <span class="preset-text">${escapeHtml(preset.text)}</span></button>`).join("")}</div>`;
+    <label class="toggle keep-shaft"><input type="checkbox" id="keep-shaft"${view.keepShaft ? " checked" : ""}>
+      <span>Оставить текущие втулку и отверстие — для детали на тот же вал</span></label>
+    <div class="presets">${current}</div>${sections}`;
 }
 
 /** Plan view without sizes, or nothing for a description that cannot be drawn. */
@@ -302,7 +322,7 @@ function renderMessages() {
     if (input) input.setAttribute("aria-invalid", String(kind === "error"));
     const box = node.querySelector(".field-msg");
     if (box) {
-      box.innerHTML = own.map((item) => `<p class="msg msg-${diagnosticKind(item)}">${escapeHtml(diagnosticText(item))}</p>`).join("") +
+      box.innerHTML = own.map((item) => `<p class="msg msg-${diagnosticKind(item)}">${escapeHtml(diagnosticText(item, state.description))}</p>`).join("") +
         owners.map((owner) => `<p class="msg msg-ref">Связано с сообщением у поля «${escapeHtml(fieldLabel(FIELD_BY_PATH.get(owner), state.description))}».</p>`).join("");
     }
     for (const item of own) shown.add(item);
@@ -315,8 +335,8 @@ function renderStatus(shown) {
   const elsewhere = activeDiagnostics().filter((item) => !shown.has(item));
   const links = elsewhere.map((item) => {
     const group = GROUPS.find(({ id }) => id === groupOfPath(item.paths[0]));
-    return `<li class="msg-${diagnosticKind(item)}">${escapeHtml(diagnosticText(item))}${group && group.id !== view.group
-      ? ` <button type="button" class="link" data-goto="${item.paths[0]}">${escapeHtml(group.title)} →</button>` : ""}</li>`;
+    return `<li class="msg-${diagnosticKind(item)}">${escapeHtml(diagnosticText(item, state.description))}${group && group.id !== view.group
+      ? ` <button type="button" class="link" data-goto="${item.paths[0]}">${escapeHtml(groupTitle(group, state.description))} →</button>` : ""}</li>`;
   }).join("");
   const headline = errors.length
     ? `<p class="status-line status-error">Деталь пока нельзя построить: ${errors.length === 1 ? "одна ошибка" : `ошибок — ${errors.length}`}.</p>`
@@ -505,7 +525,9 @@ el.form.addEventListener("input", (event) => {
 el.form.addEventListener("change", (event) => {
   const input = event.target;
   const path = input.dataset.path;
-  if (input.type === "checkbox" && path?.startsWith("/flanges/")) {
+  if (input.id === "keep-shaft") {
+    view.keepShaft = input.checked;
+  } else if (input.type === "checkbox" && path?.startsWith("/flanges/")) {
     update(setFlange(state, path.split("/")[2], input.checked), { rebuildForm: true });
     focusField(path);
   } else if (input.type === "radio" && path === "/web/type") {
@@ -544,11 +566,16 @@ el.form.addEventListener("click", (event) => {
     openGroup("rim");
     return;
   }
+  const created = event.target.closest("[data-new]");
   const preset = event.target.closest("[data-preset]");
-  if (!preset) return;
-  update(loadDescription(state, presets[Number(preset.dataset.preset)].description));
+  if (!created && !preset) return;
+  const chosen = created ? null : presets[Number(preset.dataset.preset)];
+  const description = created ? defaultDescription(schema, created.dataset.new) : chosen.description;
+  const loaded = loadDescription(state, description);
+  update(view.keepShaft ? keepShaft(loaded, state) : loaded);
   openGroup("rim");
-  showNotice(`Загружен вариант «${presets[Number(preset.dataset.preset)].title}».`);
+  const shaft = view.keepShaft ? ", втулка и отверстие прежние" : "";
+  showNotice(created ? `Новая деталь «${kindOf(description).title}»: размеры по умолчанию${shaft}.` : `Загружен вариант «${chosen.title}»${shaft}.`);
 });
 
 el.status.addEventListener("click", (event) => {
@@ -592,7 +619,7 @@ $("#save").addEventListener("click", () => {
     return;
   }
   const blob = new Blob([`${JSON.stringify(result.normalized, null, 2)}\n`], { type: "application/json" });
-  download(blob, `pulley-${result.normalized.rim.toothCount}t.json`);
+  download(blob, `${partFileName(result.normalized)}.json`);
   showNotice(result.ok ? "Описание сохранено." : "Описание сохранено, но в нём есть ошибки размеров.");
 });
 
@@ -604,7 +631,7 @@ el.stl.addEventListener("click", () => {
     return;
   }
   const exported = exportBinaryStl(build.reply.mesh, { placement: "onBed" });
-  download(new Blob([exported.data], { type: "model/stl" }), `pulley-${validation.normalized.rim.toothCount}t.stl`);
+  download(new Blob([exported.data], { type: "model/stl" }), `${partFileName(validation.normalized)}.stl`);
   showNotice("STL скачан. Деталь стоит на столе нижней гранью, координаты в миллиметрах.");
 });
 
@@ -615,6 +642,10 @@ el.retry.addEventListener("click", () => {
   scheduleBuild();
   renderPreview();
 });
+
+function partFileName({ kind, rim }) {
+  return kind === "idlerPulley" ? `idler-${String(rim.outerDiameter).replace(".", "_")}mm` : `pulley-${rim.toothCount}t`;
+}
 
 function download(blob, name) {
   const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
@@ -652,7 +683,7 @@ el.file.addEventListener("change", async () => {
 
 $("#reset").addEventListener("click", () => {
   if (!confirm("Вернуть все параметры к значениям по умолчанию?")) return;
-  update(createState(schema));
+  update(createState(schema, state.description.kind));
   openGroup("rim");
 });
 

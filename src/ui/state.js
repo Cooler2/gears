@@ -10,18 +10,16 @@ import { upgradeDescription } from "../core/parameters.js";
 
 const BORE_EXTRAS = { round: [], polygon: ["sides"], dFlat: ["flatDistance"], keyed: ["keyWidth", "keyDepth"] };
 
-export function defaultDescription(schema) {
+export function defaultDescription(schema, kind = "timingPulley") {
   const value = (definition, property) => schema.$defs[definition].properties[property].default;
+  const rim = kind === "idlerPulley"
+    ? { outerDiameter: value("idlerRim", "outerDiameter") }
+    : { profile: schema.$defs.timingRim.properties.profile.const, toothCount: value("timingRim", "toothCount") };
   return {
-    schemaVersion: 2,
-    kind: "timingPulley",
+    schemaVersion: schema.properties.schemaVersion.const,
+    kind,
     units: "mm",
-    rim: {
-      profile: schema.$defs.rim.properties.profile.const,
-      toothCount: value("rim", "toothCount"),
-      toothedWidth: value("rim", "toothedWidth"),
-      radialThickness: value("rim", "radialThickness")
-    },
+    rim: { ...rim, width: value("rimPlacement", "width"), radialThickness: value("rimPlacement", "radialThickness") },
     flanges: { lower: null, upper: null },
     web: { type: "solid", axialThickness: value("webPlacement", "axialThickness"), axialOffset: value("webPlacement", "axialOffset") },
     hub: {
@@ -34,11 +32,11 @@ export function defaultDescription(schema) {
   };
 }
 
-export function createState(schema) {
+export function createState(schema, kind) {
   const value = (definition, property) => schema.$defs[definition].properties[property].default;
   const flange = () => ({ axialThickness: value("flange", "axialThickness"), radialExtension: value("flange", "radialExtension") });
   return {
-    description: defaultDescription(schema),
+    description: defaultDescription(schema, kind),
     remembered: {
       spokes: { count: value("spokeWeb", "count"), width: value("spokeWeb", "width"), filletRadius: value("spokeWeb", "filletRadius") },
       flanges: { lower: flange(), upper: flange() },
@@ -108,8 +106,17 @@ export function loadDescription(state, description) {
   return next;
 }
 
+/** The hub and the bore of `previous` put into `state`: a new part for the same shaft. */
+export function keepShaft(state, previous) {
+  const next = structuredClone(state);
+  next.description.hub = structuredClone(previous.description.hub);
+  next.description.bore = structuredClone(previous.description.bore);
+  next.remembered.bore = structuredClone(previous.remembered.bore);
+  return next;
+}
+
 /**
- * Form state saved by an earlier version: a version 1 description is upgraded and
+ * Form state saved by an earlier version: an older description is upgraded and
  * sizes it could not remember come from the defaults. Null when it is not a state.
  */
 export function restoreState(schema, saved) {

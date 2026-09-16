@@ -1,12 +1,11 @@
 {
   "schemaVersion": 3,
-  "kind": "timingPulley",
+  "kind": "idlerPulley",
   "units": "mm",
   "rim": {
-    "profile": "gt2-2mm-experimental-v1",
-    "toothCount": 20,
+    "outerDiameter": 16,
     "width": 7,
-    "radialThickness": 1
+    "radialThickness": 2
   },
   "flanges": {
     "lower": {
@@ -24,12 +23,12 @@
     "axialOffset": 0
   },
   "hub": {
-    "outerDiameter": 7.4,
-    "lowerExtension": 1,
-    "upperExtension": 1
+    "outerDiameter": 9,
+    "lowerExtension": 0,
+    "upperExtension": 0
   },
-  "bore": { "shape": "round", "diameter": 5 },
+  "bore": { "shape": "round", "diameter": 5.2 },
   "generation": {
-    "maxChordError": 0.02
+    "maxChordError": 0.05
   }
 }

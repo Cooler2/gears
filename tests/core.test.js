@@ -53,14 +53,14 @@ test("supported tooth-count and placement boundaries build closed meshes", async
   const minimum = structuredClone(base);
   minimum.rim.toothCount = 14;
   minimum.rim.radialThickness = 1;
-  minimum.rim.toothedWidth = 2;
+  minimum.rim.width = 2;
   minimum.web.axialThickness = 2;
   minimum.bore.diameter = 0.5;
   minimum.hub.outerDiameter = 2.5;
   minimum.generation.maxChordError = 0.25;
   const maximum = structuredClone(base);
   maximum.rim.toothCount = 120;
-  maximum.rim.toothedWidth = 50;
+  maximum.rim.width = 50;
   maximum.rim.radialThickness = 25;
   maximum.web.axialThickness = 1;
   maximum.web.axialOffset = 24.5;
@@ -132,6 +132,7 @@ test("cross-field invalid examples return their documented diagnostics", async (
     "web-outside-rim.json": "E_WEB_AXIAL_RANGE",
     "spoke-overlap.json": "E_SPOKE_OVERLAP",
     "spoke-fillet.json": "E_SPOKE_FILLET",
+    "idler-no-interior.json": "E_RIM_NO_INTERIOR",
     "schema-extra-field.json": "E_SCHEMA_VALUE"
   };
   assert.deepEqual(await exampleNames("invalid"), Object.keys(cases).sort(), "every invalid example needs an expected code");
@@ -183,20 +184,58 @@ test("bore rules keep the axis inside and measure the hub wall at the farthest p
   assert.deepEqual(derived.boreExtentX, { positive: 2.5 * Math.cos(Math.PI / 5), negative: 2.5 }, "an odd polygon has a vertex at −X");
 });
 
-test("a version 1 description is read as version 2 with a round bore", async () => {
+test("version 1 and 2 descriptions are read as version 3", async () => {
   const current = await readJson("../examples/valid/spokes-flanged.json");
-  const { bore, ...rest } = current;
-  const legacy = { ...rest, schemaVersion: 1, hub: { boreDiameter: bore.diameter, ...current.hub } };
-  const snapshot = structuredClone(legacy);
-  const result = generatePulley(legacy);
-  assert.deepEqual(legacy, snapshot, "the input is not modified");
-  assert.deepEqual(result.normalized, current);
-  assert.deepEqual(Object.keys(result.normalized), Object.keys(current), "bore follows hub");
-  assert.deepEqual(result.mesh, generatePulley(current).mesh);
-  // version 2 with the old field is still strict
+  // version 2: the rim width was toothedWidth; version 1 also kept the bore in the hub
+  const rim = Object.fromEntries(Object.entries(current.rim).map(([key, value]) => [key === "width" ? "toothedWidth" : key, value]));
+  const version2 = { ...structuredClone(current), schemaVersion: 2, rim };
+  const { bore, ...rest } = version2;
+  const version1 = { ...rest, schemaVersion: 1, hub: { boreDiameter: bore.diameter, ...current.hub } };
+  const mesh = generatePulley(current).mesh;
+  for (const legacy of [version1, version2]) {
+    const snapshot = structuredClone(legacy);
+    const result = generatePulley(legacy);
+    assert.deepEqual(legacy, snapshot, "the input is not modified");
+    assert.deepEqual(result.normalized, current);
+    assert.deepEqual(Object.keys(result.normalized), Object.keys(current), "bore follows hub");
+    assert.deepEqual(Object.keys(result.normalized.rim), Object.keys(current.rim), "width keeps its place");
+    assert.deepEqual(result.mesh, mesh);
+  }
+  // the current version with an old field is still strict
   const mixed = { ...structuredClone(current), hub: { ...current.hub, boreDiameter: 5 } };
   assert.ok(validateDescription(mixed).diagnostics.some(({ paths }) => paths.includes("/hub/boreDiameter")));
-  assert.ok(validateDescription({ ...current, schemaVersion: 3 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+  assert.ok(validateDescription({ ...current, rim }).diagnostics.some(({ paths }) => paths.includes("/rim/toothedWidth")));
+  assert.ok(validateDescription({ ...current, schemaVersion: 4 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+});
+
+test("an idler pulley has a smooth rim of its diameter and shares the rest", async () => {
+  const input = await readJson("../examples/valid/idler-shaft.json");
+  const result = generatePulley(input);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  assert.deepEqual(result.diagnostics, [], "no profile warning without teeth");
+  const { derived, anchors } = result;
+  assert.equal(derived.outsideRadius, 8);
+  assert.equal(derived.rootRadius, 8);
+  assert.equal(derived.rimInnerRadius, 6);
+  assert.equal(derived.pitchRadius, null);
+  assert.equal(derived.grooveRootRadius, null);
+  assert.equal(anchors.radii.root, 8);
+  const plan = buildPlanView(result.normalized, derived);
+  assert.equal(plan.profile, null);
+  // every vertex lies on one of the circles the description names
+  const radii = [derived.boreRadius, derived.hubRadius, derived.rimInnerRadius, 8, 9.5];
+  for (let index = 0; index < result.mesh.vertices.length; index += 3) {
+    const r = Math.hypot(result.mesh.vertices[index], result.mesh.vertices[index + 1]);
+    assert.ok(radii.some((radius) => Math.abs(r - radius) < 1e-9), `vertex at r = ${r}`);
+  }
+
+  const kindCodes = (description) => validateDescription(description).diagnostics.filter(({ severity }) => severity === "error").map(({ paths }) => paths[0]);
+  assert.deepEqual(kindCodes({ ...input, kind: "gear" }), ["/kind"]);
+  assert.deepEqual(kindCodes({ ...input, rim: { ...input.rim, toothCount: 20 } }), ["/rim/toothCount"]);
+  assert.deepEqual(kindCodes({ ...input, rim: { ...input.rim, outerDiameter: 4 } }), ["/rim/outerDiameter"]);
+  const noInterior = validateDescription(await readJson("../examples/invalid/idler-no-interior.json")).diagnostics;
+  assert.deepEqual(noInterior.find(({ code }) => code === "E_RIM_NO_INTERIOR").paths, ["/rim/outerDiameter", "/rim/radialThickness"]);
+  assert.ok(noInterior.find(({ code }) => code === "E_RADIAL_ORDER").paths.includes("/rim/outerDiameter"));
 });
 
 test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
@@ -311,19 +350,22 @@ test("every valid example builds a closed solid of the expected size", async () 
   for (const name of await exampleNames("valid")) {
     const input = await readJson(`../examples/valid/${name}`);
     const result = generatePulley(input);
+    const toothed = input.kind === "timingPulley";
     assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
     assert.deepEqual(result.verification.errors, [], name);
-    assert.deepEqual(result.diagnostics.map(({ code }) => code), [...(extraWarnings[name] ?? []), "W_EXPERIMENTAL_PROFILE"], name);
+    assert.deepEqual(result.diagnostics.map(({ code }) => code), [...(extraWarnings[name] ?? []), ...(toothed ? ["W_EXPERIMENTAL_PROFILE"] : [])], name);
 
     // sizes straight from the contract formulas, not from derive()
     const { rim, flanges, hub } = input;
-    const outsideRadius = rim.toothCount / Math.PI - 0.254;
+    const outsideRadius = toothed ? rim.toothCount / Math.PI - 0.254 : rim.outerDiameter / 2;
+    // a smooth circle need not have a vertex on the X axis: it may fall short by the chord tolerance
+    const tolerance = toothed ? 1e-9 : input.generation.maxChordError;
     const flangeRadii = [flanges.lower, flanges.upper].filter(Boolean).map((flange) => outsideRadius + flange.radialExtension);
     const radius = Math.max(outsideRadius, ...flangeRadii);
-    const bottom = -rim.toothedWidth / 2 - Math.max(hub.lowerExtension, flanges.lower?.axialThickness ?? 0);
-    const top = rim.toothedWidth / 2 + Math.max(hub.upperExtension, flanges.upper?.axialThickness ?? 0);
+    const bottom = -rim.width / 2 - Math.max(hub.lowerExtension, flanges.lower?.axialThickness ?? 0);
+    const top = rim.width / 2 + Math.max(hub.upperExtension, flanges.upper?.axialThickness ?? 0);
     const { min, max } = result.mesh.bounds;
-    assert.ok(Math.abs(max[0] - radius) < 1e-9 && Math.abs(min[0] + radius) < 1e-9, `${name}: radius ${max[0]} vs ${radius}`);
+    assert.ok(Math.abs(max[0] - radius) < tolerance && Math.abs(min[0] + radius) < tolerance, `${name}: radius ${max[0]} vs ${radius}`);
     assert.ok(Math.abs(min[2] - bottom) < 1e-12 && Math.abs(max[2] - top) < 1e-12, `${name}: height`);
   }
 });

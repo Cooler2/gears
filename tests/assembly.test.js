@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { generatePulley, validateDescription } from "../src/core/generate.js";
-import { boreExtents, buildBoreContour, buildGt2Contour, buildMarkedCircle, circleSegmentCount } from "../src/core/contours.js";
+import { boreExtents, buildBoreContour, buildMarkedCircle, circleSegmentCount } from "../src/core/contours.js";
 import { triangulateSimplePolygon } from "../src/core/mesh-builder.js";
+import { rimSurface } from "../src/core/rims.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
+
+/** The base example as a timing pulley and as a smooth idler of about the same size. */
+async function kindBases() {
+  const timing = await readJson("../examples/valid/spokes-flanged.json");
+  const idler = { ...structuredClone(timing), kind: "idlerPulley", rim: { outerDiameter: 40, width: timing.rim.width, radialThickness: 2 } };
+  return { timing, idler };
+}
 
 const FLANGE_VARIANTS = {
   none: { lower: null, upper: null },
@@ -14,7 +22,7 @@ const FLANGE_VARIANTS = {
   both: { lower: { axialThickness: 0.8, radialExtension: 1 }, upper: { axialThickness: 1.2, radialExtension: 1.5 } }
 };
 const SPOKES = { type: "spokes", count: 6, width: 3, filletRadius: 1 };
-// toothedWidth is 9 in the base example, so ±2.5 with thickness 4 touches a rim end
+// the rim width is 9 in the base example, so ±2.5 with thickness 4 touches a rim end
 const WEB_VARIANTS = {
   solidFull: { type: "solid", axialThickness: 9, axialOffset: 0 },
   solidThin: { type: "solid", axialThickness: 2, axialOffset: 0.5 },
@@ -36,14 +44,14 @@ const BORE_VARIANTS = {
   wideKey: { shape: "keyed", diameter: 6, keyWidth: 5.5, keyDepth: 0.5 }
 };
 
-test("every flange, web and hub-extension combination builds one closed solid", async () => {
-  const base = await readJson("../examples/valid/spokes-flanged.json");
+test("every kind, flange, web and hub-extension combination builds one closed solid", async () => {
+  for (const [kindName, base] of Object.entries(await kindBases())) {
   for (const [flangeName, flanges] of Object.entries(FLANGE_VARIANTS)) {
     for (const [webName, web] of Object.entries(WEB_VARIANTS)) {
       for (const [lowerExtension, upperExtension] of HUB_VARIANTS) {
         const input = { ...structuredClone(base), flanges, web };
         Object.assign(input.hub, { lowerExtension, upperExtension });
-        const label = `${flangeName}/${webName}/hub ${lowerExtension},${upperExtension}`;
+        const label = `${kindName}/${flangeName}/${webName}/hub ${lowerExtension},${upperExtension}`;
         const result = generatePulley(input);
         assert.equal(result.ok, true, `${label}: ${JSON.stringify(result.diagnostics)}`);
         assert.deepEqual(result.verification.errors, [], label);
@@ -56,6 +64,7 @@ test("every flange, web and hub-extension combination builds one closed solid", 
         }
       }
     }
+  }
   }
 });
 
@@ -249,7 +258,7 @@ function assertNoDuplicateVertices(mesh, label) {
 
 function assertExpectedBounds(input, result, label) {
   const { derived } = result;
-  const halfWidth = input.rim.toothedWidth / 2;
+  const halfWidth = input.rim.width / 2;
   const lowerZ = Math.min(derived.hubLowerZ, -halfWidth - (input.flanges.lower?.axialThickness ?? 0));
   const upperZ = Math.max(derived.hubUpperZ, halfWidth + (input.flanges.upper?.axialThickness ?? 0));
   assert.equal(result.mesh.bounds.min[2], lowerZ, `${label}: min z`);
@@ -317,17 +326,16 @@ function insideBore(bore, x, y, margin) {
 /** Volume of the stacked prisms, from shoelace areas of the same discretised contours. */
 function expectedSolidWebVolume(input, derived) {
   const error = input.generation.maxChordError;
-  const N = input.rim.toothCount;
-  const halfPitch = Array.from({ length: 2 * N }, (_, index) => index * Math.PI / N);
+  const surface = rimSurface(input.kind, input.rim, { outside: derived.outsideRadius }, error);
   const circleArea = (radius, marks = []) => polygonArea(buildMarkedCircle(radius, circleSegmentCount(radius, error), marks).points);
-  const rimInner = circleArea(derived.rimInnerRadius, halfPitch);
+  const rimInner = circleArea(derived.rimInnerRadius, surface.marks);
   const hub = circleArea(derived.hubRadius, buildBoreContour(input.bore, error).corners);
-  let volume = (polygonArea(buildGt2Contour(N, derived.outsideRadius)) - rimInner) * input.rim.toothedWidth;
+  let volume = (polygonArea(surface.points) - rimInner) * input.rim.width;
   const bore = polygonArea(buildBoreContour(input.bore, error).points);
   volume += (hub - bore) * (derived.hubUpperZ - derived.hubLowerZ);
   volume += (rimInner - hub) * (derived.webUpperZ - derived.webLowerZ);
   for (const flange of [input.flanges.lower, input.flanges.upper]) {
-    if (flange) volume += (circleArea(derived.outsideRadius + flange.radialExtension, halfPitch) - rimInner) * flange.axialThickness;
+    if (flange) volume += (circleArea(derived.outsideRadius + flange.radialExtension, surface.marks) - rimInner) * flange.axialThickness;
   }
   return volume;
 }
@@ -343,8 +351,8 @@ function polygonArea(points) {
 }
 
 function* samplePoints(derived, input) {
-  const radius = derived.grooveRootRadius;
-  const halfWidth = input.rim.toothedWidth / 2;
+  const radius = derived.rootRadius;
+  const halfWidth = input.rim.width / 2;
   const levels = [
     (derived.webLowerZ + derived.webUpperZ) / 2,
     derived.webLowerZ + 0.3,
@@ -408,14 +416,14 @@ function* samplePoints(derived, input) {
 /** Material at a point from the analytic description, or null within margin of a boundary. */
 function expectedMaterial(input, derived, [x, y, z], margin) {
   const r = Math.hypot(x, y);
-  const halfWidth = input.rim.toothedWidth / 2;
+  const halfWidth = input.rim.width / 2;
   const shellLowerZ = -halfWidth - (input.flanges.lower?.axialThickness ?? 0);
   const shellUpperZ = halfWidth + (input.flanges.upper?.axialThickness ?? 0);
-  const { boreRadius, hubRadius, rimInnerRadius, grooveRootRadius, hubLowerZ, hubUpperZ, webLowerZ, webUpperZ } = derived;
-  const radii = [boreRadius, hubRadius, rimInnerRadius, grooveRootRadius];
+  const { boreRadius, hubRadius, rimInnerRadius, rootRadius, hubLowerZ, hubUpperZ, webLowerZ, webUpperZ } = derived;
+  const radii = [boreRadius, hubRadius, rimInnerRadius, rootRadius];
   const levels = [hubLowerZ, hubUpperZ, webLowerZ, webUpperZ, shellLowerZ, shellUpperZ, -halfWidth, halfWidth];
   if (radii.some((value) => Math.abs(r - value) < margin) || levels.some((value) => Math.abs(z - value) < margin)) return null;
-  if (r > grooveRootRadius) return null; // teeth are not modelled here
+  if (r > rootRadius) return null; // teeth and the smooth surface are not modelled here
   if (r < boreRadius) return false;
   if (r < hubRadius) return z > hubLowerZ && z < hubUpperZ;
   if (r > rimInnerRadius) return z > shellLowerZ && z < shellUpperZ;

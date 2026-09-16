@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gears.local/schemas/pulley-v2.schema.json",
-  "title": "Gears timing pulley description, version 2",
-  "description": "Static structure and scalar limits for the first GT 2 mm pulley contract. Cross-field geometry rules are defined in docs/contract.md.",
+  "$id": "https://gears.local/schemas/pulley-v3.schema.json",
+  "title": "Gears pulley description, version 3",
+  "description": "Static structure and scalar limits of a GT2 timing pulley or a smooth idler pulley. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,19 +18,22 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 2,
-      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter; readers upgrade it to bore.shape round."
+      "const": 3,
+      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only; readers upgrade them."
     },
     "kind": {
-      "const": "timingPulley",
-      "description": "Part family handled by this contract."
+      "enum": ["timingPulley", "idlerPulley"],
+      "description": "Part kind; it selects the rim. Flanges, web, hub and bore are shared."
     },
     "units": {
       "const": "mm",
       "description": "Unit for every dimensional input and output unless explicitly stated otherwise."
     },
     "rim": {
-      "$ref": "#/$defs/rim"
+      "oneOf": [
+        { "$ref": "#/$defs/timingRim" },
+        { "$ref": "#/$defs/idlerRim" }
+      ]
     },
     "flanges": {
       "$ref": "#/$defs/flanges"
@@ -56,11 +59,36 @@
       "$ref": "#/$defs/generation"
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "idlerPulley" } } },
+      "then": { "properties": { "rim": { "$ref": "#/$defs/idlerRim" } } },
+      "else": { "properties": { "rim": { "$ref": "#/$defs/timingRim" } } }
+    }
+  ],
   "$defs": {
-    "rim": {
+    "rimPlacement": {
+      "properties": {
+        "width": {
+          "type": "number",
+          "minimum": 2,
+          "maximum": 50,
+          "default": 6,
+          "description": "Axial width of the rim working surface, centered on z=0 from -width/2 to +width/2; flanges and hub extensions are outside it."
+        },
+        "radialThickness": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 25,
+          "default": 2,
+          "description": "Radial material thickness inward from the lowest point of the working surface (tooth root or smooth surface) to the inner rim radius."
+        }
+      }
+    },
+    "timingRim": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["profile", "toothCount", "toothedWidth", "radialThickness"],
+      "required": ["profile", "toothCount", "width", "radialThickness"],
       "properties": {
         "profile": {
           "const": "gt2-2mm-experimental-v1",
@@ -73,20 +101,24 @@
           "default": 40,
           "description": "Number of equally spaced pulley grooves."
         },
-        "toothedWidth": {
+        "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
+        "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }
+      }
+    },
+    "idlerRim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outerDiameter", "width", "radialThickness"],
+      "properties": {
+        "outerDiameter": {
           "type": "number",
-          "minimum": 2,
-          "maximum": 50,
-          "default": 6,
-          "description": "Axial width of the toothed rim, centered on z=0 from -toothedWidth/2 to +toothedWidth/2."
+          "minimum": 5,
+          "maximum": 150,
+          "default": 20,
+          "description": "Diameter of the smooth cylindrical surface the belt runs on."
         },
-        "radialThickness": {
-          "type": "number",
-          "minimum": 1,
-          "maximum": 25,
-          "default": 2,
-          "description": "Radial material thickness inward from the tooth-root radius to the inner rim radius."
-        }
+        "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
+        "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }
       }
     },
     "flange": {
@@ -99,14 +131,14 @@
           "minimum": 0.4,
           "maximum": 5,
           "default": 1,
-          "description": "Axial flange thickness measured away from the toothed rim."
+          "description": "Axial flange thickness measured away from the rim end."
         },
         "radialExtension": {
           "type": "number",
           "minimum": 0.5,
           "maximum": 10,
           "default": 1,
-          "description": "Radial projection beyond the pulley outside radius."
+          "description": "Radial projection beyond the outside radius of the working surface (tooth tips or smooth surface)."
         }
       }
     },
@@ -121,7 +153,7 @@
             { "$ref": "#/$defs/flange" }
           ],
           "default": null,
-          "description": "Flange below z=-toothedWidth/2; null means absent."
+          "description": "Flange below z=-width/2; null means absent."
         },
         "upper": {
           "oneOf": [
@@ -129,7 +161,7 @@
             { "$ref": "#/$defs/flange" }
           ],
           "default": null,
-          "description": "Flange above z=+toothedWidth/2; null means absent."
+          "description": "Flange above z=+width/2; null means absent."
         }
       }
     },
@@ -147,7 +179,7 @@
           "minimum": -24.5,
           "maximum": 24.5,
           "default": 0,
-          "description": "Z coordinate of the web mid-plane relative to the toothed-rim mid-plane at z=0; positive is toward the upper side."
+          "description": "Z coordinate of the web mid-plane relative to the rim mid-plane at z=0; positive is toward the upper side."
         }
       }
     },
@@ -222,14 +254,14 @@
           "minimum": 0,
           "maximum": 50,
           "default": 0,
-          "description": "Hub projection below the lower toothed-rim face at z=-toothedWidth/2."
+          "description": "Hub projection below the lower rim face at z=-width/2."
         },
         "upperExtension": {
           "type": "number",
           "minimum": 0,
           "maximum": 50,
           "default": 0,
-          "description": "Hub projection above the upper toothed-rim face at z=+toothedWidth/2."
+          "description": "Hub projection above the upper rim face at z=+width/2."
         }
       }
     },

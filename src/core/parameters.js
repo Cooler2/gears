@@ -1,8 +1,8 @@
-import { boreExtents, buildGt2Contour } from "./contours.js";
+import { boreExtents } from "./contours.js";
+import { PART_KINDS, RIM_FIELDS, rimRadii, rimSizePath, rimSurface } from "./rims.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "bore", "generation"];
-const RIM_FIELDS = ["profile", "toothCount", "toothedWidth", "radialThickness"];
 const FLANGES_FIELDS = ["lower", "upper"];
 const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
 const SOLID_WEB_FIELDS = ["type", "axialThickness", "axialOffset"];
@@ -49,31 +49,40 @@ export function validateDescription(original) {
 }
 
 /**
- * Version 1 kept a round bore as hub.boreDiameter. Such a description is read as
- * version 2 with bore.shape "round"; anything else is returned unchanged, and the
- * argument itself is never modified.
+ * Earlier versions are read as the current one; key order is kept, anything that
+ * does not look like them is returned unchanged, and the argument is never modified.
+ * Version 1 kept a round bore as hub.boreDiameter (version 2: bore.shape "round").
+ * Versions 1 and 2 were timing pulleys only and called the rim width toothedWidth.
  */
 export function upgradeDescription(input) {
-  if (!isRecord(input) || input.schemaVersion !== 1 || !isRecord(input.hub) || !Object.hasOwn(input.hub, "boreDiameter")) return input;
-  const { boreDiameter, ...hub } = input.hub;
-  const upgraded = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (key === "schemaVersion") upgraded.schemaVersion = SCHEMA_VERSION;
-    else if (key === "hub") Object.assign(upgraded, { hub, bore: { shape: "round", diameter: boreDiameter } });
-    else upgraded[key] = value;
+  let current = input;
+  if (isRecord(current) && current.schemaVersion === 1 && isRecord(current.hub) && Object.hasOwn(current.hub, "boreDiameter")) {
+    const { boreDiameter, ...hub } = current.hub;
+    current = replaceKeys(current, { schemaVersion: { schemaVersion: 2 }, hub: { hub, bore: { shape: "round", diameter: boreDiameter } } });
   }
-  return upgraded;
+  if (isRecord(current) && current.schemaVersion === 2 && isRecord(current.rim) && Object.hasOwn(current.rim, "toothedWidth")) {
+    const rim = replaceKeys(current.rim, { toothedWidth: { width: current.rim.toothedWidth } });
+    current = replaceKeys(current, { schemaVersion: { schemaVersion: SCHEMA_VERSION }, rim: { rim } });
+  }
+  return current;
+}
+
+/** Copy of an object where each key of `replacements` is replaced, in place, by the keys of its value. */
+function replaceKeys(object, replacements) {
+  const result = {};
+  for (const [key, value] of Object.entries(object)) Object.assign(result, Object.hasOwn(replacements, key) ? replacements[key] : { [key]: value });
+  return result;
 }
 
 function buildAnchors(input, derived) {
-  const halfWidth = input.rim.toothedWidth / 2;
+  const halfWidth = input.rim.width / 2;
   return {
     axis: { origin: [0, 0, 0], direction: [0, 0, 1] },
     radii: {
       bore: derived.boreRadius,
       hub: derived.hubRadius,
       rimInner: derived.rimInnerRadius,
-      grooveRoot: derived.grooveRootRadius,
+      root: derived.rootRadius,
       outside: derived.outsideRadius,
       pitch: derived.pitchRadius
     },
@@ -93,13 +102,20 @@ function buildAnchors(input, derived) {
 
 function validateStatic(input, diagnostics) {
   exactObject(input, ROOT_FIELDS, "", diagnostics);
-  constant(input.kind, "timingPulley", "/kind", diagnostics);
+  enumeration(input.kind, PART_KINDS, "/kind", diagnostics);
   constant(input.units, "mm", "/units", diagnostics);
 
-  if (exactObject(input.rim, RIM_FIELDS, "/rim", diagnostics)) {
-    constant(input.rim.profile, "gt2-2mm-experimental-v1", "/rim/profile", diagnostics);
-    integerRange(input.rim.toothCount, 14, 120, "/rim/toothCount", diagnostics);
-    numberRange(input.rim.toothedWidth, 2, 50, "/rim/toothedWidth", diagnostics);
+  // the fields of a rim depend on the kind: with an unknown kind there is nothing to check them against
+  if (!PART_KINDS.includes(input.kind)) {
+    if (!isRecord(input.rim)) schemaError(diagnostics, "/rim", "object");
+  } else if (exactObject(input.rim, RIM_FIELDS[input.kind], "/rim", diagnostics)) {
+    if (input.kind === "idlerPulley") {
+      numberRange(input.rim.outerDiameter, 5, 150, "/rim/outerDiameter", diagnostics);
+    } else {
+      constant(input.rim.profile, "gt2-2mm-experimental-v1", "/rim/profile", diagnostics);
+      integerRange(input.rim.toothCount, 14, 120, "/rim/toothCount", diagnostics);
+    }
+    numberRange(input.rim.width, 2, 50, "/rim/width", diagnostics);
     numberRange(input.rim.radialThickness, 1, 25, "/rim/radialThickness", diagnostics);
   }
   if (exactObject(input.flanges, FLANGES_FIELDS, "/flanges", diagnostics)) {
@@ -154,7 +170,7 @@ function validateFlange(value, path, diagnostics) {
 function validateRelations(input, derived, diagnostics) {
   const span = derived.rimInnerRadius - derived.hubRadius;
   if (derived.rimInnerRadius <= 0) {
-    diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", ["/rim/toothCount", "/rim/radialThickness"],
+    diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", [rimSizePath(input.kind), "/rim/radialThickness"],
       { rimInnerRadius: derived.rimInnerRadius }));
   }
   const { bore } = input;
@@ -172,12 +188,12 @@ function validateRelations(input, derived, diagnostics) {
       { wall: derived.hubRadius - derived.boreOuterRadius, minimum: 1 }));
   }
   if (span < minimumWebSpan(input.web.type)) {
-    diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", "/rim/toothCount"],
+    diagnostics.push(diagnostic("E_RADIAL_ORDER", "error", "description", ["/hub/outerDiameter", "/rim/radialThickness", rimSizePath(input.kind)],
       { span, minimum: minimumWebSpan(input.web.type), maxHubDiameter: 2 * (derived.rimInnerRadius - minimumWebSpan(input.web.type)) }));
   }
-  const rimUpperZ = input.rim.toothedWidth / 2;
+  const rimUpperZ = input.rim.width / 2;
   if (derived.webLowerZ < -rimUpperZ || derived.webUpperZ > rimUpperZ) {
-    diagnostics.push(diagnostic("E_WEB_AXIAL_RANGE", "error", "description", ["/web/axialThickness", "/web/axialOffset", "/rim/toothedWidth"],
+    diagnostics.push(diagnostic("E_WEB_AXIAL_RANGE", "error", "description", ["/web/axialThickness", "/web/axialOffset", "/rim/width"],
       { webLowerZ: derived.webLowerZ, webUpperZ: derived.webUpperZ, rimLowerZ: -rimUpperZ, rimUpperZ }));
   }
   if (input.web.type === "spokes") {
@@ -215,33 +231,35 @@ function addWarnings(input, derived, diagnostics) {
   if (input.web.axialThickness < THIN_FEATURE) diagnostics.push(thin("/web/axialThickness", input.web.axialThickness));
   if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
   if (hubWall < THIN_FEATURE) diagnostics.push(thin("/hub/outerDiameter", hubWall));
-  diagnostics.push(diagnostic("W_EXPERIMENTAL_PROFILE", "warning", "build", ["/rim/profile"]));
+  if (input.kind === "timingPulley") diagnostics.push(diagnostic("W_EXPERIMENTAL_PROFILE", "warning", "build", ["/rim/profile"]));
 }
 
 function derive(input) {
-  const pitchRadius = input.rim.toothCount / Math.PI;
-  const outsideRadius = pitchRadius - 0.254;
-  const grooveRootRadius = outsideRadius - 0.75;
-  const rimInnerRadius = grooveRootRadius - input.rim.radialThickness;
+  const radii = rimRadii(input.kind, input.rim);
+  const toothed = input.kind === "timingPulley";
+  const outsideRadius = radii.outside;
+  const rimInnerRadius = radii.root - input.rim.radialThickness;
   const boreRadius = input.bore.diameter / 2;
   const bore = boreExtents(input.bore);
   const hubRadius = input.hub.outerDiameter / 2;
-  const halfWidth = input.rim.toothedWidth / 2;
+  const halfWidth = input.rim.width / 2;
   const webLowerZ = input.web.axialOffset - input.web.axialThickness / 2;
   const webUpperZ = input.web.axialOffset + input.web.axialThickness / 2;
   const hubLowerZ = -halfWidth - input.hub.lowerExtension;
   const hubUpperZ = halfWidth + input.hub.upperExtension;
-  const profile = buildGt2Contour(input.rim.toothCount, outsideRadius);
-  const radialBound = Math.max(...profile.map(([x, y]) => Math.hypot(x, y)),
+  // a smooth surface is exactly outsideRadius; the tooth profile is measured as built
+  const surfaceBound = toothed ? Math.max(...rimSurface(input.kind, input.rim, radii).points.map(([x, y]) => Math.hypot(x, y))) : outsideRadius;
+  const radialBound = Math.max(surfaceBound,
     input.flanges.lower ? outsideRadius + input.flanges.lower.radialExtension : 0,
     input.flanges.upper ? outsideRadius + input.flanges.upper.radialExtension : 0);
   const lowerFlangeZ = input.flanges.lower ? -halfWidth - input.flanges.lower.axialThickness : -halfWidth;
   const upperFlangeZ = input.flanges.upper ? halfWidth + input.flanges.upper.axialThickness : halfWidth;
   return {
-    pitch: 2,
-    pitchRadius,
+    pitch: toothed ? 2 : null,
+    pitchRadius: radii.pitch,
     outsideRadius,
-    grooveRootRadius,
+    rootRadius: radii.root,
+    grooveRootRadius: toothed ? radii.root : null,
     rimInnerRadius,
     boreRadius,
     boreOuterRadius: bore.outerRadius,
@@ -277,16 +295,15 @@ function normalize(input) {
   });
   const bore = { shape: input.bore.shape, diameter: input.bore.diameter };
   for (const field of BORE_FIELDS[input.bore.shape].slice(2)) bore[field] = input.bore[field];
+  const rim = input.kind === "idlerPulley"
+    ? { outerDiameter: input.rim.outerDiameter }
+    : { profile: "gt2-2mm-experimental-v1", toothCount: input.rim.toothCount };
+  Object.assign(rim, { width: input.rim.width, radialThickness: input.rim.radialThickness });
   return {
     schemaVersion: SCHEMA_VERSION,
-    kind: "timingPulley",
+    kind: input.kind,
     units: "mm",
-    rim: {
-      profile: "gt2-2mm-experimental-v1",
-      toothCount: input.rim.toothCount,
-      toothedWidth: input.rim.toothedWidth,
-      radialThickness: input.rim.radialThickness
-    },
+    rim,
     flanges: { lower: flange(input.flanges.lower), upper: flange(input.flanges.upper) },
     web,
     hub: {

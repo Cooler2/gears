@@ -1,4 +1,5 @@
-import { buildBoreContour, buildGt2Contour } from "./contours.js";
+import { buildBoreContour } from "./contours.js";
+import { rimSurface } from "./rims.js";
 import { layoutSpokes } from "./spokes.js";
 
 // fillets and the bore are drawn smoother than the mesh needs, independent of maxChordError
@@ -11,7 +12,8 @@ const DRAWING_CHORD_ERROR = 0.005;
  * relation rule, so a form can show the conflict. Coordinates follow the mesh:
  * millimetres, +Y up, angles clockwise from +Y.
  *
- * bore is the bore outline with the same orientation as the mesh loop: the flat,
+ * profile is the toothed working surface, null for a smooth rim: that one is the
+ * circle radii.outside. bore is the bore outline with the same orientation as the mesh loop: the flat,
  * the keyway and one polygon side face +X.
  *
  * spokes is null for a solid web. Each spoke outline is a closed polygon from the
@@ -22,15 +24,15 @@ const DRAWING_CHORD_ERROR = 0.005;
  * plain strips and schematic is true; if even strips do not fit they are omitted.
  */
 export function buildPlanView(normalized, derived) {
-  const { rim, web, flanges } = normalized;
+  const { kind, rim, web, flanges } = normalized;
   return {
-    profile: buildGt2Contour(rim.toothCount, derived.outsideRadius),
+    profile: kind === "idlerPulley" ? null : rimSurface(kind, rim, { outside: derived.outsideRadius }).points,
     bore: buildBoreContour(normalized.bore, DRAWING_CHORD_ERROR).points,
     radii: {
       bore: derived.boreRadius,
       hub: derived.hubRadius,
       rimInner: derived.rimInnerRadius,
-      grooveRoot: derived.grooveRootRadius,
+      root: derived.rootRadius,
       outside: derived.outsideRadius,
       pitch: derived.pitchRadius
     },

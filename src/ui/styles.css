@@ -436,6 +436,10 @@ button {
 
 .preset:hover { border-color: var(--accent); }
 .preset-current { border-style: dashed; }
+.preset-new { border-style: dashed; }
+.preset-kind { margin: 22px 0 4px; font-size: 16px; }
+.preset-kind + .lead { margin-bottom: 10px; }
+.keep-shaft { margin: 0 0 14px; }
 .preset-thumb svg { width: 100%; height: auto; display: block; }
 .preset-title { font-weight: 600; }
 .preset-text { font-size: 13px; color: var(--muted); }

@@ -1,4 +1,4 @@
-// Form groups and fields of the pulley contract v1.
+// Part kinds, form groups and fields of the pulley contract v3.
 //
 // Everything about a field that the contract already defines (limits, defaults,
 // integer or not) is read from the JSON Schema through `schema`; this file adds
@@ -6,9 +6,27 @@
 // or hint may be a function of the description when its meaning depends on it.
 // `schema: [def, property]` points at $defs[def].properties[property].
 
+export const KINDS = [
+  { id: "timingPulley", title: "Шкив GT2", text: "Зубчатый шкив под ремень GT2 с шагом 2 мм.", experimental: true },
+  { id: "idlerPulley", title: "Гладкий шкив", text: "Ролик без зубьев: натяжитель или обводной ролик ремня." }
+];
+
+export function kindOf(description) {
+  return KINDS.find(({ id }) => id === description?.kind) ?? KINDS[0];
+}
+
+const isIdler = (description) => description?.kind === "idlerPulley";
+
+/** Words for the rim of the kind: a toothed rim ("венец", "зубчатая часть") or a smooth one ("обод"). */
+function rimWords(description) {
+  return isIdler(description)
+    ? { body: "обод", bodyOf: "обода", part: "обод", partOf: "обода", surface: "поверхности обода" }
+    : { body: "венец", bodyOf: "венца", part: "зубчатая часть", partOf: "зубчатой части", surface: "вершин зубьев" };
+}
+
 export const GROUPS = [
   { id: "presets", title: "Варианты" },
-  { id: "rim", title: "Ремень и зубья" },
+  { id: "rim", title: (description) => isIdler(description) ? "Ремень и обод" : "Ремень и зубья" },
   { id: "flanges", title: "Фланцы" },
   { id: "web", title: "Полотно и спицы" },
   { id: "hub", title: "Втулка" },
@@ -16,69 +34,84 @@ export const GROUPS = [
   { id: "generation", title: "Точность модели" }
 ];
 
+export function groupTitle(group, description) {
+  return typeof group.title === "function" ? group.title(description) : group.title;
+}
+
 const isSpokes = (description) => description.web?.type === "spokes";
 const hasBore = (...shapes) => (description) => shapes.includes(description.bore?.shape);
 const hasFlange = (side) => (description) => Boolean(description.flanges?.[side]);
 
 export const FIELDS = [
   {
-    path: "/rim/toothCount", group: "rim", schema: ["rim", "toothCount"],
+    path: "/rim/toothCount", group: "rim", schema: ["timingRim", "toothCount"], applies: (description) => !isIdler(description),
     label: "Число зубьев", symbol: "N",
     hint: "Число канавок под зубья ремня GT2 с шагом 2 мм. Делительный диаметр равен 2N/π."
   },
   {
-    path: "/rim/toothedWidth", group: "rim", schema: ["rim", "toothedWidth"],
-    label: "Ширина зубчатой части", symbol: "W", unit: "мм",
+    path: "/rim/outerDiameter", group: "rim", schema: ["idlerRim", "outerDiameter"], applies: isIdler,
+    label: "Диаметр обода", symbol: "D", unit: "мм",
+    hint: "Гладкая цилиндрическая поверхность, по которой идёт ремень."
+  },
+  {
+    path: "/rim/width", group: "rim", schema: ["rimPlacement", "width"],
+    label: (description) => isIdler(description) ? "Ширина обода" : "Ширина зубчатой части", symbol: "W", unit: "мм",
     hint: "Обычно на 0,5–1 мм шире ремня. Фланцы и выступы втулки в неё не входят."
   },
   {
-    path: "/rim/radialThickness", group: "rim", schema: ["rim", "radialThickness"],
-    label: "Толщина венца", symbol: "T_r", unit: "мм",
-    hint: "Кольцо материала под зубьями: от дна канавок внутрь до полотна или спиц."
+    path: "/rim/radialThickness", group: "rim", schema: ["rimPlacement", "radialThickness"],
+    label: (description) => `Толщина ${rimWords(description).bodyOf}`, symbol: "T_r", unit: "мм",
+    hint: (description) => isIdler(description)
+      ? "Кольцо материала под поверхностью обода, внутрь до полотна или спиц."
+      : "Кольцо материала под зубьями: от дна канавок внутрь до полотна или спиц."
   },
   {
     path: "/flanges/lower", group: "flanges", kind: "toggle",
-    label: "Нижний фланец", hint: "Бортик под зубчатой частью, не даёт ремню соскочить вниз."
+    label: "Нижний фланец", hint: (description) => `Бортик под ${isIdler(description) ? "ободом" : "зубчатой частью"}, не даёт ремню соскочить вниз.`
   },
   {
     path: "/flanges/lower/axialThickness", group: "flanges", schema: ["flange", "axialThickness"], applies: hasFlange("lower"),
     label: "Толщина нижнего фланца", symbol: "T_f−", unit: "мм",
-    hint: "Вдоль оси, вниз от нижнего торца зубчатой части."
+    hint: (description) => `Вдоль оси, вниз от нижнего торца ${rimWords(description).partOf}.`
   },
   {
     path: "/flanges/lower/radialExtension", group: "flanges", schema: ["flange", "radialExtension"], applies: hasFlange("lower"),
     label: "Выступ нижнего фланца", symbol: "E_f−", unit: "мм",
-    hint: "На сколько фланец выше вершин зубьев."
+    hint: (description) => `На сколько фланец выше ${rimWords(description).surface}.`
   },
   {
     path: "/flanges/upper", group: "flanges", kind: "toggle",
-    label: "Верхний фланец", hint: "Бортик над зубчатой частью. При печати он нависает над зубьями."
+    label: "Верхний фланец",
+    hint: (description) => isIdler(description)
+      ? "Бортик над ободом. При печати он нависает над ободом."
+      : "Бортик над зубчатой частью. При печати он нависает над зубьями."
   },
   {
     path: "/flanges/upper/axialThickness", group: "flanges", schema: ["flange", "axialThickness"], applies: hasFlange("upper"),
     label: "Толщина верхнего фланца", symbol: "T_f+", unit: "мм",
-    hint: "Вдоль оси, вверх от верхнего торца зубчатой части."
+    hint: (description) => `Вдоль оси, вверх от верхнего торца ${rimWords(description).partOf}.`
   },
   {
     path: "/flanges/upper/radialExtension", group: "flanges", schema: ["flange", "radialExtension"], applies: hasFlange("upper"),
     label: "Выступ верхнего фланца", symbol: "E_f+", unit: "мм",
-    hint: "На сколько фланец выше вершин зубьев."
+    hint: (description) => `На сколько фланец выше ${rimWords(description).surface}.`
   },
   {
     path: "/web/type", group: "web", kind: "choice",
-    label: "Соединение венца и втулки",
+    label: (description) => `Соединение ${rimWords(description).bodyOf} и втулки`,
     options: [{ value: "solid", label: "Сплошное полотно" }, { value: "spokes", label: "Спицы" }],
     hint: "Сплошной диск или прямые спицы со скруглениями."
   },
   {
     path: "/web/axialThickness", group: "web", schema: ["webPlacement", "axialThickness"],
     label: (description) => isSpokes(description) ? "Толщина спиц" : "Толщина полотна", symbol: "T_w", unit: "мм",
-    hint: "Вдоль оси. Равная ширине зубчатой части толщина даёт сплошное тело."
+    hint: (description) => `Вдоль оси. Равная ширине ${rimWords(description).partOf} толщина даёт сплошное тело.`
   },
   {
     path: "/web/axialOffset", group: "web", schema: ["webPlacement", "axialOffset"],
     label: (description) => isSpokes(description) ? "Смещение спиц" : "Смещение полотна", symbol: "Δz", unit: "мм",
-    hint: "Средняя плоскость полотна относительно середины зубчатой части, плюс — вверх. Полотно не должно выходить за торцы венца."
+    hint: (description) => `Средняя плоскость полотна относительно середины ${rimWords(description).partOf}, плюс — вверх. ` +
+      `Полотно не должно выходить за торцы ${rimWords(description).bodyOf}.`
   },
   {
     path: "/web/count", group: "web", schema: ["spokeWeb", "count"], applies: isSpokes,
@@ -103,12 +136,12 @@ export const FIELDS = [
   {
     path: "/hub/lowerExtension", group: "hub", schema: ["hub", "lowerExtension"],
     label: "Выступ втулки вниз", symbol: "L_h−", unit: "мм",
-    hint: "Ниже нижнего торца зубчатой части. Ноль — вровень."
+    hint: (description) => `Ниже нижнего торца ${rimWords(description).partOf}. Ноль — вровень.`
   },
   {
     path: "/hub/upperExtension", group: "hub", schema: ["hub", "upperExtension"],
     label: "Выступ втулки вверх", symbol: "L_h+", unit: "мм",
-    hint: "Выше верхнего торца зубчатой части. Ноль — вровень."
+    hint: (description) => `Выше верхнего торца ${rimWords(description).partOf}. Ноль — вровень.`
   },
   {
     path: "/bore/shape", group: "bore", kind: "choice",

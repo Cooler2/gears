@@ -3,14 +3,14 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildPlanView, validateDescription } from "../src/core/generate.js";
 import { chordSummary, renderChord, renderPlan, renderSection } from "../src/ui/drawings.js";
-import { FIELDS, GROUPS, fieldSchema, fieldsOf, groupOfPath } from "../src/ui/fields.js";
+import { FIELD_BY_PATH, FIELDS, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupTitle } from "../src/ui/fields.js";
 import { formatNumber, inputText, plural, splitSymbol } from "../src/ui/format.js";
 import { diagnosticKind, diagnosticText } from "../src/ui/messages.js";
 import { PRESETS } from "../src/ui/presets.js";
-import { createState, getValue, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setValue, setWebType } from "../src/ui/state.js";
+import { createState, getValue, keepShaft, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setValue, setWebType } from "../src/ui/state.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
-const schema = await readJson("../schemas/pulley-v2.schema.json");
+const schema = await readJson("../schemas/pulley-v3.schema.json");
 const exampleNames = async (kind) => (await readdir(new URL(`../examples/${kind}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();
 const numeric = (field) => !field.kind;
 
@@ -175,7 +175,9 @@ test("switching the bore shape keeps the diameter and the sizes of other shapes"
 test("a form state saved with a version 1 description is upgraded", () => {
   const { description } = createState(schema);
   const { bore, ...rest } = description;
-  const saved = { description: { ...rest, schemaVersion: 1, hub: { boreDiameter: 6, ...description.hub } }, remembered: { spokes: { count: 4, width: 2, filletRadius: 1 }, flanges: createState(schema).remembered.flanges } };
+  const { width, ...rim } = description.rim;
+  const legacy = { ...rest, schemaVersion: 1, rim: { ...rim, toothedWidth: width }, hub: { boreDiameter: 6, ...description.hub } };
+  const saved = { description: legacy, remembered: { spokes: { count: 4, width: 2, filletRadius: 1 }, flanges: createState(schema).remembered.flanges } };
   const restored = restoreState(schema, saved);
   assert.deepEqual(restored.description, { ...description, bore: { shape: "round", diameter: 6 } });
   assert.equal(restored.remembered.spokes.count, 4);
@@ -191,6 +193,46 @@ test("loading a description remembers its spokes and flanges", async () => {
   const back = setWebType(solid, "spokes");
   assert.deepEqual(back.description.web, preset.web);
   assert.equal(setFlange(setFlange(loaded, "lower", false), "lower", true).description.flanges.lower.axialThickness, preset.flanges.lower.axialThickness);
+});
+
+test("each kind has valid defaults, variants, its own rim fields and words", async () => {
+  for (const { id, title } of KINDS) {
+    const { description } = createState(schema, id);
+    assert.equal(description.kind, id);
+    assert.equal(validateDescription(description).ok, true, id);
+    const kinds = await Promise.all(PRESETS.map(async ({ file }) => (await readJson(`../examples/valid/${file}`)).kind));
+    assert.ok(kinds.includes(id), `${title} has no variants`);
+  }
+  const timing = createState(schema).description;
+  const idler = createState(schema, "idlerPulley").description;
+  const paths = (description) => fieldsOf("rim", description).map(({ path }) => path);
+  assert.deepEqual(paths(timing), ["/rim/toothCount", "/rim/width", "/rim/radialThickness"]);
+  assert.deepEqual(paths(idler), ["/rim/outerDiameter", "/rim/width", "/rim/radialThickness"]);
+  const rim = GROUPS.find(({ id }) => id === "rim");
+  assert.equal(groupTitle(rim, timing), "Ремень и зубья");
+  assert.equal(groupTitle(rim, idler), "Ремень и обод");
+  assert.equal(fieldLabel(FIELD_BY_PATH.get("/rim/radialThickness"), idler), "Толщина обода");
+  // a smooth pulley is never explained with teeth
+  for (const field of FIELDS.filter((item) => fieldsOf(item.group, idler).includes(item))) {
+    assert.ok(!/зуб|венц|канав/i.test(fieldLabel(field, idler) + fieldHint(field, idler)), field.path);
+  }
+  const noInterior = validateDescription(await readJson("../examples/invalid/idler-no-interior.json")).diagnostics;
+  assert.match(diagnosticText(noInterior.find(({ code }) => code === "E_RIM_NO_INTERIOR")), /^Обод слишком толстый/);
+  assert.match(diagnosticText(noInterior.find(({ code }) => code === "E_RADIAL_ORDER")), /больше диаметр обода/);
+  const fillet = { code: "E_SPOKE_FILLET", paths: ["/web/filletRadius"], details: { maxByWidth: 1, maxBySpan: 2 } };
+  assert.match(diagnosticText(fillet, idler), /втулкой и ободом/);
+  assert.match(diagnosticText(fillet, timing), /втулкой и венцом/);
+});
+
+test("a new part of another kind can keep the hub and the bore", async () => {
+  const motor = loadDescription(createState(schema), await readJson("../examples/valid/motor-d-flat.json"));
+  const idler = createState(schema, "idlerPulley").description;
+  const kept = keepShaft(loadDescription(motor, idler), motor);
+  assert.equal(kept.description.kind, "idlerPulley");
+  assert.deepEqual(kept.description.rim, idler.rim);
+  assert.deepEqual(kept.description.hub, motor.description.hub);
+  assert.deepEqual(kept.description.bore, motor.description.bore);
+  assert.equal(setBoreShape(setBoreShape(kept, "round"), "dFlat").description.bore.flatDistance, 4.7, "remembered bore sizes come along");
 });
 
 test("presets point at valid examples", async () => {

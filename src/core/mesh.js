@@ -1,20 +1,19 @@
-import { buildBoreContour, buildGt2Contour, buildMarkedCircle, circleSegmentCount, rotateContour } from "./contours.js";
+import { buildBoreContour, buildMarkedCircle, circleSegmentCount } from "./contours.js";
 import { createMeshBuilder, isSimplePolygon, MeshBuildError } from "./mesh-builder.js";
+import { rimSurface } from "./rims.js";
 import { layoutSpokes } from "./spokes.js";
 
 const MAX_LOOP_SEGMENTS = 4096;
 const MAX_TRIANGLES = 200000;
-/** Index of the first groove centre in buildGt2Contour: it lies on the +Y ray. */
-const PROFILE_START = 9;
 
 /**
- * Build the closed boundary of the pulley.
+ * Build the closed boundary of the part.
  *
  * Every surface is either a vertical wall between two copies of one XY contour
  * or a flat face at one Z level (see mesh-builder.js). From the axis outwards
  * the contours are: the bore (a circle or a shaped loop, see buildBoreContour),
- * hub R_h, rim inner circle R_i, tooth profile and
- * the flange edges R_o + E_f. Axially the rim spans [−W/2, +W/2], flanges add
+ * hub R_h, rim inner circle R_i, the working surface of
+ * the rim (see rims.js) and the flange edges R_o + E_f. Axially the rim spans [−W/2, +W/2], flanges add
  * their thickness outside it, the hub spans [hubLowerZ, hubUpperZ] and the web
  * [webLowerZ, webUpperZ]. Between the web levels the hub cylinder and the rim
  * inner surface are covered by the web; with spokes they stay exposed inside
@@ -24,15 +23,14 @@ export function buildPulleyMesh(description, derived) {
   const { rim, flanges, web } = description;
   const { hubRadius, rimInnerRadius, outsideRadius, webLowerZ, webUpperZ, hubLowerZ, hubUpperZ } = derived;
   const maxChordError = description.generation.maxChordError;
-  const rimLowerZ = -rim.toothedWidth / 2;
-  const rimUpperZ = rim.toothedWidth / 2;
+  const rimLowerZ = -rim.width / 2;
+  const rimUpperZ = rim.width / 2;
   // outer limits of the belt part: flange far faces or rim ends
   const shellLowerZ = flanges.lower ? rimLowerZ - flanges.lower.axialThickness : rimLowerZ;
   const shellUpperZ = flanges.upper ? rimUpperZ + flanges.upper.axialThickness : rimUpperZ;
 
-  // Rim-side circles get a vertex at every groove centre and every tip between
-  // grooves, so caps against the concave profile always triangulate.
-  const halfPitchAngles = Array.from({ length: 2 * rim.toothCount }, (_, index) => index * Math.PI / rim.toothCount);
+  // rim-side circles get the vertices the working surface asks for
+  const surface = rimSurface(description.kind, rim, { outside: outsideRadius }, maxChordError);
   const layout = web.type === "spokes" ? layoutSpokes({
     count: web.count,
     width: web.width,
@@ -41,7 +39,7 @@ export function buildPulleyMesh(description, derived) {
     rimRadius: rimInnerRadius,
     maxChordError
   }) : null;
-  // spoke k uses hub marks 3k..3k+2 and rim marks 4k..4k+3 (after the half-pitch marks)
+  // spoke k uses hub marks 3k..3k+2 and rim marks 4k..4k+3 (after the surface marks)
   const hubMarks = layout ? layout.spokes.flatMap(({ axisAngle }) => [
     axisAngle - layout.hubTangentAngle,
     axisAngle,
@@ -59,16 +57,16 @@ export function buildPulleyMesh(description, derived) {
   const hubBoreMarks = [...hubMarks, ...bore.corners];
 
   const circle = (radius, marks) => buildMarkedCircle(radius, circleSegmentCount(radius, maxChordError), marks);
-  const flangeEdge = (flange) => flange ? circle(outsideRadius + flange.radialExtension, halfPitchAngles) : null;
+  const flangeEdge = (flange) => flange ? circle(outsideRadius + flange.radialExtension, surface.marks) : null;
   const contours = {
     bore,
     hub: circle(hubRadius, hubBoreMarks),
-    rimInner: circle(rimInnerRadius, [...halfPitchAngles, ...rimSpokeMarks]),
-    profile: { points: rotateContour(buildGt2Contour(rim.toothCount, outsideRadius), PROFILE_START) },
+    rimInner: circle(rimInnerRadius, [...surface.marks, ...rimSpokeMarks]),
+    profile: { points: surface.points },
     lowerFlange: flangeEdge(flanges.lower),
     upperFlange: flangeEdge(flanges.upper)
   };
-  const circles = [contours.bore, contours.hub, contours.rimInner, contours.lowerFlange, contours.upperFlange];
+  const circles = [contours.bore, contours.hub, contours.rimInner, contours.profile, contours.lowerFlange, contours.upperFlange];
   if (circles.some((contour) => contour && contour.points.length > MAX_LOOP_SEGMENTS)) return complexityFailure();
 
   const mesh = createMeshBuilder();
@@ -119,7 +117,7 @@ export function buildPulleyMesh(description, derived) {
     if (webUpperZ < hubUpperZ) mesh.wall({ lower: loop(hub, webUpperZ), upper: loop(hub, hubUpperZ), normal: "outward" });
   }
 
-  /** Tooth surface, flangeless rim ends and the rim inner surface outside the web levels. */
+  /** Working surface, flangeless rim ends and the rim inner surface outside the web levels. */
   function addRim() {
     const { rimInner, profile } = contours;
     mesh.wall({ lower: loop(profile, rimLowerZ), upper: loop(profile, rimUpperZ), normal: "outward" });
@@ -132,8 +130,8 @@ export function buildPulleyMesh(description, derived) {
 
   /**
    * One flange: a ring from R_i to its edge, extruded away from the rim end.
-   * On the rim side only the ledge outside the teeth is exposed; the area under
-   * the teeth is interior material and gets no surface.
+   * On the rim side only the ledge outside the working surface is exposed; the
+   * area under it is interior material and gets no surface.
    */
   function addFlange(side) {
     if (!flanges[side]) return;
@@ -164,7 +162,7 @@ export function buildPulleyMesh(description, derived) {
   function addSpokes() {
     const count = layout.spokes.length;
     const hubIndex = (spoke, side) => contours.hub.markIndices[3 * spoke + (side === "leading" ? 2 : 0)];
-    const rimIndex = (spoke, side) => contours.rimInner.markIndices[halfPitchAngles.length + 4 * spoke + (side === "leading" ? 3 : 0)];
+    const rimIndex = (spoke, side) => contours.rimInner.markIndices[surface.marks.length + 4 * spoke + (side === "leading" ? 3 : 0)];
     const chains = new Map();
     /** Side chain between T1 and T4, from the hub to the rim, at height z. */
     const chain = (spoke, side, z) => {

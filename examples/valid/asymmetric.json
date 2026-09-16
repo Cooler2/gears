@@ -1,11 +1,11 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "kind": "timingPulley",
   "units": "mm",
   "rim": {
     "profile": "gt2-2mm-experimental-v1",
     "toothCount": 40,
-    "toothedWidth": 8,
+    "width": 8,
     "radialThickness": 1.8
   },
   "flanges": {
