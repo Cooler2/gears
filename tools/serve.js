@@ -10,7 +10,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const port = Number(process.argv[2] ?? process.env.PORT ?? 8080);
+const port = Number(process.argv[2] ?? process.env.PORT ?? 8517);
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
