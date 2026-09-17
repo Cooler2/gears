@@ -1,0 +1,5 @@
+GearGen/
+gear-generator-brief.md
+out/
+dist/
+node_modules/
