@@ -13,10 +13,11 @@ async function kindBases() {
   const timing = await readJson("../examples/valid/spokes-flanged.json");
   const idler = { ...structuredClone(timing), kind: "idlerPulley", rim: { outerDiameter: 40, width: timing.rim.width, radialThickness: 2 } };
   const gear = {
-    ...structuredClone(timing), kind: "spurGear",
-    rim: { module: 1, toothCount: 40, pressureAngle: 20, profileShift: 0.2, backlash: 0.1, width: timing.rim.width, radialThickness: 2 }
+    ...structuredClone(timing), kind: "gear",
+    rim: { module: 1, toothCount: 40, pressureAngle: 20, profileShift: 0.2, backlash: 0.1, helix: "none", width: timing.rim.width, radialThickness: 2 }
   };
-  return { timing, idler, gear };
+  const inclined = (helix, helixAngle) => ({ ...structuredClone(gear), rim: { ...gear.rim, helix, helixAngle } });
+  return { timing, idler, gear, helical: inclined("helical", -25), herringbone: inclined("herringbone", 40) };
 }
 
 const FLANGE_VARIANTS = {
@@ -55,7 +56,7 @@ test("every kind, flange, web and hub-extension combination builds one closed so
   for (const [kindName, base] of Object.entries(await kindBases())) {
   for (const [flangeName, flanges] of Object.entries(FLANGE_VARIANTS)) {
     // a gear has no flanges
-    if (kindName === "gear" && flangeName !== "none") continue;
+    if (base.kind === "gear" && flangeName !== "none") continue;
     for (const [webName, web] of Object.entries(WEB_VARIANTS)) {
       for (const [lowerExtension, upperExtension] of HUB_VARIANTS) {
         const input = { ...structuredClone(base), flanges, web };
@@ -69,7 +70,10 @@ test("every kind, flange, web and hub-extension combination builds one closed so
         assertExpectedBounds(input, result, label);
         if (web.type !== "spokes") {
           const expected = expectedSolidWebVolume(input, result.derived);
-          assert.ok(Math.abs(result.verification.signedVolume - expected) < 1e-9 * expected, `${label}: volume`);
+          // between turned sections the working surface sinks inwards by no more than the chord tolerance
+          const helical = base.rim.helix && base.rim.helix !== "none";
+          const tolerance = helical ? outlinePerimeter(input) * input.generation.maxChordError * input.rim.width : 1e-9 * expected;
+          assert.ok(Math.abs(result.verification.signedVolume - expected) < tolerance, `${label}: volume ${result.verification.signedVolume} vs ${expected}`);
         }
       }
     }
@@ -350,6 +354,11 @@ function expectedSolidWebVolume(input, derived) {
     if (flange) volume += (circleArea(derived.outsideRadius + flange.radialExtension, surface.marks) - rimInner) * flange.axialThickness;
   }
   return volume;
+}
+
+function outlinePerimeter(input) {
+  const { points } = rimSurface(input.kind, input.rim, null, input.generation.maxChordError);
+  return points.reduce((sum, point, index) => sum + Math.hypot(...points[(index + 1) % points.length].map((value, axis) => value - point[axis])), 0);
 }
 
 function polygonArea(points) {

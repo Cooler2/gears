@@ -1,9 +1,15 @@
-// Involute spur gear tooth outline.
+// Involute gear tooth outline in the transverse plane (perpendicular to the axis).
 //
 // Standard basic rack: addendum 1·m, dedendum 1.25·m, measured from the pitch
 // circle and moved outwards by the profile shift x·m. The tooth thickness along
 // the pitch circle is m·(π/2 + 2x·tan α) less the backlash, so two gears with
 // backlash j1 and j2 at the standard centre distance have j1 + j2 of play.
+//
+// A helical tooth is cut by the same rack turned by the helix angle β, so module,
+// pressure angle and backlash are normal ones, measured across the tooth. The
+// transverse section is then an involute gear of module m/cos β and pressure angle
+// atan(tan α / cos β); addendum, dedendum and the shift keep their sizes in mm, and
+// the backlash along the pitch circle grows to j/cos β.
 //
 // A flank is an involute of the base circle from max(base, root) up to the tip.
 // Below the base circle the flank continues as a radial line down to the root
@@ -21,8 +27,13 @@ const MAX_FLANK_SEGMENTS = 64;
 
 const involute = (angle) => Math.tan(angle) - angle;
 
+/** Signed helix angle in radians: positive for right-hand teeth, 0 for straight ones. */
+export function helixAngleOf(rim) {
+  return rim.helix && rim.helix !== "none" ? rim.helixAngle * DEGREE : 0;
+}
+
 /**
- * Radii and tooth thickness of a spur gear rim.
+ * Radii and transverse tooth thickness of a gear rim.
  *
  * halfAngle(r) is half the angular thickness of a tooth at radius r ≥ base;
  * below the base circle the flank is radial, so it keeps halfAngle(base).
@@ -30,13 +41,16 @@ const involute = (angle) => Math.tan(angle) - angle;
  * when the flanks meet earlier (pointed is then true). thin means the tooth has no
  * material even at the flank start; closed means neighbouring teeth touch at the root.
  */
-export function spurGearGeometry({ module, toothCount, pressureAngle, profileShift, backlash }) {
-  const angle = pressureAngle * DEGREE;
-  const pitch = module * toothCount / 2;
+export function gearGeometry(rim) {
+  const { module, toothCount, pressureAngle, profileShift, backlash } = rim;
+  const helix = Math.abs(helixAngleOf(rim)); // the section does not depend on the hand
+  const transverseModule = module / Math.cos(helix);
+  const angle = Math.atan(Math.tan(pressureAngle * DEGREE) / Math.cos(helix));
+  const pitch = transverseModule * toothCount / 2;
   const base = pitch * Math.cos(angle);
   const root = pitch - module * (1.25 - profileShift);
   const fullTip = pitch + module * (1 + profileShift);
-  const thickness = module * (Math.PI / 2 + 2 * profileShift * Math.tan(angle)) - backlash;
+  const thickness = transverseModule * Math.PI / 2 + 2 * profileShift * module * Math.tan(angle) - backlash / Math.cos(helix);
   const halfAngle = (radius) => thickness / (2 * pitch) + involute(angle) - involute(Math.acos(Math.min(1, base / Math.max(radius, base))));
   const minHalfAngle = (radius) => MIN_LAND * module / (2 * radius);
   const flankStart = Math.max(root, base);
@@ -57,6 +71,9 @@ export function spurGearGeometry({ module, toothCount, pressureAngle, profileShi
   }
   const rootHalfGap = Math.PI / toothCount - halfAngle(flankStart);
   return {
+    helix,
+    transverseModule,
+    transversePressureAngle: angle,
     pitch,
     base,
     root,
@@ -69,7 +86,7 @@ export function spurGearGeometry({ module, toothCount, pressureAngle, profileShi
     thin,
     closed: rootHalfGap <= minHalfAngle(root),
     // fewest teeth that a standard rack does not undercut at this shift
-    undercutLimit: 2 * (1 - profileShift) / Math.sin(angle) ** 2
+    undercutLimit: 2 * (1 - profileShift) * Math.cos(helix) / Math.sin(angle) ** 2
   };
 }
 
@@ -78,8 +95,8 @@ export function spurGearGeometry({ module, toothCount, pressureAngle, profileShi
  * Out-of-rule sizes (thin or closed teeth) still give points for drawings; such a
  * rim never reaches the mesh.
  */
-export function buildSpurGearContour(rim, maxChordError) {
-  const gear = spurGearGeometry(rim);
+export function buildGearContour(rim, maxChordError) {
+  const gear = gearGeometry(rim);
   const { toothCount } = rim;
   const space = Math.PI / toothCount; // tooth centre to space centre
   const flankTop = Math.max(gear.tip, gear.flankStart);

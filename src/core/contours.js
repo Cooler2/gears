@@ -200,3 +200,10 @@ function keyedBore(radius, segments, halfWidth, depth) {
 export function rotateContour(points, startIndex) {
   return points.map((_, offset) => points[(startIndex + offset) % points.length]);
 }
+
+/** The points turned clockwise about the axis by `angle`, in the same order. */
+export function turnContour(points, angle) {
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  return points.map(([x, y]) => [x * cosine + y * sine, y * cosine - x * sine]);
+}

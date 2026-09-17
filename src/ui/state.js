@@ -3,8 +3,8 @@
 // The description itself follows the contract: switching the web to solid drops
 // the spoke fields, removing a flange stores null and a bore keeps only the fields
 // of its shape. So that such a switch does not lose what the user typed, the last
-// spoke fields, flanges and bore sizes are kept in `remembered` and restored when
-// the part comes back. Pure functions, no DOM.
+// spoke fields, flanges, bore sizes and the helix angle are kept in `remembered` and
+// restored when the part comes back. Pure functions, no DOM.
 
 import { upgradeDescription } from "../core/parameters.js";
 
@@ -16,7 +16,7 @@ export function defaultDescription(schema, kind = "timingPulley") {
   const rims = {
     timingPulley: () => ({ profile: schema.$defs.timingRim.properties.profile.const, toothCount: value("timingRim", "toothCount") }),
     idlerPulley: () => ({ outerDiameter: value("idlerRim", "outerDiameter") }),
-    spurGear: () => Object.fromEntries(["module", "toothCount", "pressureAngle", "profileShift", "backlash"].map((field) => [field, value("gearRim", field)]))
+    gear: () => Object.fromEntries(["module", "toothCount", "pressureAngle", "profileShift", "backlash", "helix"].map((field) => [field, value("gearRim", field)]))
   };
   const rim = rims[kind]();
   return {
@@ -45,7 +45,8 @@ export function createState(schema, kind) {
       spokes: { count: value("spokeWeb", "count"), width: value("spokeWeb", "width"), filletRadius: value("spokeWeb", "filletRadius") },
       placement: Object.fromEntries(WEB_PLACEMENT.map((field) => [field, value("webPlacement", field)])),
       flanges: { lower: flange(), upper: flange() },
-      bore: Object.fromEntries(Object.values(BORE_EXTRAS).flat().map((field) => [field, value("borePlacement", field)]))
+      bore: Object.fromEntries(Object.values(BORE_EXTRAS).flat().map((field) => [field, value("borePlacement", field)])),
+      helixAngle: value("gearRim", "helixAngle")
     }
   };
 }
@@ -97,11 +98,27 @@ export function setBoreShape(state, shape) {
   return next;
 }
 
+/** Straight teeth drop the helix angle, inclined ones take it back; the angle goes after the helix, as in the contract. */
+export function setHelix(state, helix) {
+  const { rim } = state.description;
+  if (rim.helix === helix) return state;
+  const next = structuredClone(state);
+  if (rim.helix !== "none") next.remembered.helixAngle = rim.helixAngle;
+  const { helixAngle, ...rest } = rim;
+  next.description.rim = {};
+  for (const [key, value] of Object.entries(rest)) {
+    next.description.rim[key] = key === "helix" ? helix : value;
+    if (key === "helix" && helix !== "none") next.description.rim.helixAngle = next.remembered.helixAngle;
+  }
+  return next;
+}
+
 /** Replace the description (preset or file); parts it lacks keep their remembered values. */
 export function loadDescription(state, description) {
   const next = { description: structuredClone(description), remembered: structuredClone(state.remembered) };
-  const { web, flanges, bore } = description;
+  const { web, flanges, bore, rim } = description;
   for (const field of BORE_EXTRAS[bore.shape] ?? []) next.remembered.bore[field] = bore[field];
+  if (Number.isFinite(rim.helixAngle)) next.remembered.helixAngle = rim.helixAngle;
   if (web.type === "spokes") next.remembered.spokes = { count: web.count, width: web.width, filletRadius: web.filletRadius };
   if (web.type !== "none") next.remembered.placement = Object.fromEntries(WEB_PLACEMENT.map((field) => [field, web[field]]));
   for (const side of ["lower", "upper"]) {

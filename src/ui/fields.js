@@ -1,4 +1,4 @@
-// Part kinds, form groups and fields of the pulley contract v4.
+// Part kinds, form groups and fields of the pulley contract v5.
 //
 // Everything about a field that the contract already defines (limits, defaults,
 // integer or not) is read from the JSON Schema through `schema`; this file adds
@@ -9,7 +9,7 @@
 export const KINDS = [
   { id: "timingPulley", title: "Шкив GT2", text: "Зубчатый шкив под ремень GT2 с шагом 2 мм.", experimental: true },
   { id: "idlerPulley", title: "Гладкий шкив", text: "Ролик без зубьев: натяжитель или обводной ролик ремня." },
-  { id: "spurGear", title: "Прямозубая шестерня", text: "Эвольвентные зубья. Шестерни одной пары должны иметь одинаковые модуль и угол давления." }
+  { id: "gear", title: "Шестерня", text: "Эвольвентные зубья: прямые, косые или шевронные. Шестерни одной пары должны иметь одинаковые модуль, угол давления и угол наклона зуба." }
 ];
 
 export function kindOf(description) {
@@ -17,7 +17,8 @@ export function kindOf(description) {
 }
 
 const isIdler = (description) => description?.kind === "idlerPulley";
-const isGear = (description) => description?.kind === "spurGear";
+const isGear = (description) => description?.kind === "gear";
+const isInclined = (description) => isGear(description) && description.rim?.helix !== "none";
 
 /** Words for the rim of the kind: a toothed rim ("венец", "зубчатая часть") or a smooth one ("обод"). */
 function rimWords(description) {
@@ -61,7 +62,9 @@ export const FIELDS = [
   {
     path: "/rim/module", group: "rim", schema: ["gearRim", "module"], applies: isGear,
     label: "Модуль", symbol: "m", unit: "мм",
-    hint: "Размер зуба: шаг по делительной окружности равен πm, делительный диаметр — mN. Шестерни одной пары должны иметь одинаковый модуль."
+    hint: (description) => isInclined(description)
+      ? "Размер зуба поперёк зуба (нормальный модуль): высота зуба и его толщина те же, что у прямозубой шестерни этого модуля, а делительный диаметр больше в 1/cos β раз, mN/cos β. Шестерни одной пары должны иметь одинаковый модуль."
+      : "Размер зуба: шаг по делительной окружности равен πm, делительный диаметр — mN. Шестерни одной пары должны иметь одинаковый модуль."
   },
   {
     path: "/rim/toothCount", group: "rim", schema: (description) => [isGear(description) ? "gearRim" : "timingRim", "toothCount"],
@@ -74,7 +77,8 @@ export const FIELDS = [
   {
     path: "/rim/pressureAngle", group: "rim", schema: ["gearRim", "pressureAngle"], applies: isGear,
     label: "Угол давления", symbol: "α", unit: "°",
-    hint: "Наклон боковых сторон зуба в точке на делительной окружности. Стандарт — 20°; у пары он должен совпадать."
+    hint: (description) => "Наклон боковых сторон зуба в точке на делительной окружности. Стандарт — 20°; у пары он должен совпадать." +
+      (isInclined(description) ? " У косого зуба угол задан поперёк зуба; в торцевом сечении на чертеже он больше." : "")
   },
   {
     path: "/rim/profileShift", group: "rim", schema: ["gearRim", "profileShift"], applies: isGear,
@@ -85,6 +89,19 @@ export const FIELDS = [
     path: "/rim/backlash", group: "rim", schema: ["gearRim", "backlash"], applies: isGear,
     label: "Утонение зуба", symbol: "j", unit: "мм",
     hint: "На столько зуб тоньше расчётного по делительной окружности, поровну с каждой стороны. Зазор в паре равен сумме утонений обеих шестерён; для печати обычно 0,1–0,2 мм."
+  },
+  {
+    path: "/rim/helix", group: "rim", kind: "choice", applies: isGear,
+    label: "Зубья",
+    options: [{ value: "none", label: "Прямые" }, { value: "helical", label: "Косые" }, { value: "herringbone", label: "Шеврон" }],
+    hint: "Косые зубья входят в зацепление плавнее и тише прямых, но давят на вал вдоль оси. " +
+      "Шеврон — две косые половины навстречу друг другу, осевые силы гасятся. Направление наклона задаёт знак угла."
+  },
+  {
+    path: "/rim/helixAngle", group: "rim", schema: ["gearRim", "helixAngle"], applies: isInclined,
+    label: "Угол наклона зуба", symbol: "β", unit: "°",
+    hint: "Между зубом и осью на делительном цилиндре. Плюс — правые зубья: поднимаются против часовой стрелки, как правая резьба; минус — левые. У шеврона знак относится к нижней половине. " +
+      "У пары величина одна, знаки разные: +20 работает с −20. Шеврон с противоположным знаком — та же деталь, перевёрнутая. Обычно 15–30°, у шеврона до 45°; больше угол — плавнее ход и больше осевая сила."
   },
   {
     path: "/rim/outerDiameter", group: "rim", schema: ["idlerRim", "outerDiameter"], applies: isIdler,

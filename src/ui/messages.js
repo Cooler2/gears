@@ -3,7 +3,7 @@
 import { formatNumber as n } from "./format.js";
 
 const TEXTS = {
-  E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion от 1 до 4.",
+  E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion от 1 до 5.",
   E_SCHEMA_VALUE: ({ rule, minimum, maximum, expected }) => {
     if (rule === "numberRange") return `Нужно число от ${n(minimum)} до ${n(maximum)}.`;
     if (rule === "integerRange") return `Нужно целое число от ${minimum} до ${maximum}.`;

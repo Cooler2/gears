@@ -1,8 +1,8 @@
 import { boreExtents } from "./contours.js";
-import { spurGearGeometry } from "./involute.js";
-import { PART_KINDS, RIM_FIELDS, rimRadii, rimSizePath, rimSurface } from "./rims.js";
+import { gearGeometry } from "./involute.js";
+import { HELICES, PART_KINDS, rimFields, rimRadii, rimSizePath, rimSurface } from "./rims.js";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "bore", "generation"];
 const FLANGES_FIELDS = ["lower", "upper"];
 const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
@@ -61,6 +61,8 @@ export function validateDescription(original) {
  * Version 4 places the web and the hub against the faces of the part (flanges
  * included): the web by its thinning and alignment instead of its thickness and
  * mid-plane, the hub extensions from those faces instead of the rim ends.
+ * Version 5 renames the spur gear to gear, whose teeth may be helical: an earlier
+ * gear gets straight teeth.
  */
 export function upgradeDescription(input) {
   let current = input;
@@ -73,6 +75,13 @@ export function upgradeDescription(input) {
     current = replaceKeys(current, { schemaVersion: { schemaVersion: 3 }, rim: { rim } });
   }
   if (isRecord(current) && current.schemaVersion === 3) current = upgradeVersion3(current);
+  if (isRecord(current) && current.schemaVersion === 4) {
+    const gear = current.kind === "spurGear" && isRecord(current.rim) && Object.hasOwn(current.rim, "backlash");
+    current = replaceKeys(current, {
+      schemaVersion: { schemaVersion: 5 },
+      ...(gear ? { kind: { kind: "gear" }, rim: { rim: replaceKeys(current.rim, { backlash: { backlash: current.rim.backlash, helix: "none" } }) } } : {})
+    });
+  }
   return current;
 }
 
@@ -94,7 +103,7 @@ function upgradeVersion3(input) {
     axialOffset: alignment === "center" ? tidy(web.axialOffset - (faceLowerZ + faceUpperZ) / 2) : 0
   };
   return replaceKeys(input, {
-    schemaVersion: { schemaVersion: SCHEMA_VERSION },
+    schemaVersion: { schemaVersion: 4 },
     web: { web: replaceKeys(web, { axialThickness: placement, axialOffset: {} }) },
     hub: {
       hub: replaceKeys(hub, {
@@ -150,15 +159,17 @@ function validateStatic(input, diagnostics) {
   // the fields of a rim depend on the kind: with an unknown kind there is nothing to check them against
   if (!PART_KINDS.includes(input.kind)) {
     if (!isRecord(input.rim)) schemaError(diagnostics, "/rim", "object");
-  } else if (exactObject(input.rim, RIM_FIELDS[input.kind], "/rim", diagnostics)) {
+  } else if (exactObject(input.rim, rimFields(input.kind, input.rim), "/rim", diagnostics)) {
     if (input.kind === "idlerPulley") {
       numberRange(input.rim.outerDiameter, 5, 150, "/rim/outerDiameter", diagnostics);
-    } else if (input.kind === "spurGear") {
+    } else if (input.kind === "gear") {
       numberRange(input.rim.module, 0.3, 10, "/rim/module", diagnostics);
       integerRange(input.rim.toothCount, 6, 200, "/rim/toothCount", diagnostics);
       numberRange(input.rim.pressureAngle, 14.5, 30, "/rim/pressureAngle", diagnostics);
       numberRange(input.rim.profileShift, -1, 1, "/rim/profileShift", diagnostics);
       numberRange(input.rim.backlash, 0, 1, "/rim/backlash", diagnostics);
+      enumeration(input.rim.helix, HELICES, "/rim/helix", diagnostics);
+      if (input.rim.helix !== "none") numberRange(input.rim.helixAngle, -45, 45, "/rim/helixAngle", diagnostics);
     } else {
       constant(input.rim.profile, "gt2-2mm-experimental-v1", "/rim/profile", diagnostics);
       integerRange(input.rim.toothCount, 14, 120, "/rim/toothCount", diagnostics);
@@ -169,7 +180,7 @@ function validateStatic(input, diagnostics) {
   if (exactObject(input.flanges, FLANGES_FIELDS, "/flanges", diagnostics)) {
     for (const side of FLANGES_FIELDS) {
       // a flange past the tooth tips would stop the mating gear
-      if (input.kind === "spurGear" && input.flanges[side] !== null) constant(input.flanges[side], null, `/flanges/${side}`, diagnostics);
+      if (input.kind === "gear" && input.flanges[side] !== null) constant(input.flanges[side], null, `/flanges/${side}`, diagnostics);
       else validateFlange(input.flanges[side], `/flanges/${side}`, diagnostics);
     }
   }
@@ -230,8 +241,8 @@ function validateRelations(input, derived, diagnostics) {
     diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", [rimSizePath(input.kind), "/rim/radialThickness"],
       { rimInnerRadius: derived.rimInnerRadius }));
   }
-  if (input.kind === "spurGear") {
-    const gear = spurGearGeometry(input.rim);
+  if (input.kind === "gear") {
+    const gear = gearGeometry(input.rim);
     if (gear.thin) {
       diagnostics.push(diagnostic("E_GEAR_TOOTH_THIN", "error", "description", ["/rim/backlash", "/rim/module", "/rim/profileShift"],
         { thickness: gear.thickness }));
@@ -315,13 +326,13 @@ function addWarnings(input, derived, diagnostics) {
   if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
   if (hubWall < THIN_FEATURE) diagnostics.push(thin("/hub/outerDiameter", hubWall));
   if (input.kind === "timingPulley") diagnostics.push(diagnostic("W_EXPERIMENTAL_PROFILE", "warning", "build", ["/rim/profile"]));
-  if (input.kind === "spurGear") {
-    const gear = spurGearGeometry(input.rim);
+  if (input.kind === "gear") {
+    const gear = gearGeometry(input.rim);
     // the limit is rounded as usual: a 20° rack gives the textbook 17 teeth for 17.1, a trace of undercut is harmless
     const minimum = Math.round(gear.undercutLimit);
     if (input.rim.toothCount < minimum) {
       diagnostics.push(diagnostic("W_GEAR_UNDERCUT", "warning", "build", ["/rim/toothCount", "/rim/profileShift"],
-        { minimum, shift: 1 - input.rim.toothCount * Math.sin(input.rim.pressureAngle * Math.PI / 180) ** 2 / 2 }));
+        { minimum, shift: 1 - input.rim.toothCount * Math.sin(gear.transversePressureAngle) ** 2 / (2 * Math.cos(gear.helix)) }));
     }
     if (gear.pointed) {
       diagnostics.push(diagnostic("W_GEAR_POINTED", "warning", "build", ["/rim/profileShift", "/rim/backlash"],
@@ -332,6 +343,7 @@ function addWarnings(input, derived, diagnostics) {
 
 function derive(input) {
   const radii = rimRadii(input.kind, input.rim);
+  const gear = input.kind === "gear" ? gearGeometry(input.rim) : null;
   const toothed = input.kind !== "idlerPulley";
   const outsideRadius = radii.outside;
   const noWeb = input.web.type === "none";
@@ -361,8 +373,11 @@ function derive(input) {
     input.flanges.lower ? outsideRadius + input.flanges.lower.radialExtension : 0,
     input.flanges.upper ? outsideRadius + input.flanges.upper.radialExtension : 0);
   return {
-    // belt pitch of a timing pulley, circular pitch πm of a gear
-    pitch: input.kind === "timingPulley" ? 2 : input.kind === "spurGear" ? Math.PI * input.rim.module : null,
+    // belt pitch of a timing pulley, circular pitch of a gear along the pitch circle: π·m/cos β
+    pitch: input.kind === "timingPulley" ? 2 : gear ? Math.PI * gear.transverseModule : null,
+    transverseModule: gear ? gear.transverseModule : null,
+    // axial advance of a helical tooth over one turn, null for straight teeth
+    lead: gear && gear.helix > 0 ? 2 * Math.PI * gear.pitch / Math.tan(gear.helix) : null,
     pitchRadius: radii.pitch,
     outsideRadius,
     rootRadius: radii.root,
@@ -413,7 +428,7 @@ function normalize(input) {
   const bore = { shape: input.bore.shape, diameter: input.bore.diameter };
   for (const field of BORE_FIELDS[input.bore.shape].slice(2)) bore[field] = input.bore[field];
   // every rim field is a checked scalar, the GT2 profile name included
-  const rim = Object.fromEntries(RIM_FIELDS[input.kind].map((field) => [field, input.rim[field]]));
+  const rim = Object.fromEntries(rimFields(input.kind, input.rim).map((field) => [field, input.rim[field]]));
   return {
     schemaVersion: SCHEMA_VERSION,
     kind: input.kind,

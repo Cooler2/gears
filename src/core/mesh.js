@@ -1,4 +1,4 @@
-import { buildBoreContour, buildMarkedCircle, circleSegmentCount } from "./contours.js";
+import { buildBoreContour, buildMarkedCircle, circleSegmentCount, turnContour } from "./contours.js";
 import { createMeshBuilder, isSimplePolygon, MeshBuildError } from "./mesh-builder.js";
 import { rimSurface } from "./rims.js";
 import { layoutSpokes } from "./spokes.js";
@@ -13,7 +13,8 @@ const MAX_TRIANGLES = 200000;
  * or a flat face at one Z level (see mesh-builder.js). From the axis outwards
  * the contours are: the bore (a circle or a shaped loop, see buildBoreContour),
  * hub R_h, rim inner circle R_i, the working surface of
- * the rim (see rims.js) and the flange edges R_o + E_f. Axially the rim spans [−W/2, +W/2], flanges add
+ * the rim (see rims.js) and the flange edges R_o + E_f. A helical working surface
+ * is a stack of walls between turned copies of one contour. Axially the rim spans [−W/2, +W/2], flanges add
  * their thickness outside it, the hub spans [hubLowerZ, hubUpperZ] and the web
  * [webLowerZ, webUpperZ]. Between the web levels the hub cylinder and the rim
  * inner surface are covered by the web; with spokes they stay exposed inside
@@ -71,6 +72,10 @@ export function buildPulleyMesh(description, derived) {
   };
   const circles = [contours.bore, contours.hub, contours.rimInner, contours.profile, contours.lowerFlange, contours.upperFlange];
   if (circles.some((contour) => contour && contour.points.length > MAX_LOOP_SEGMENTS)) return complexityFailure();
+  // the working surface alone would exceed the triangle limit: stop before building it
+  if (2 * contours.profile.points.length * (surface.sections.length - 1) > MAX_TRIANGLES) return complexityFailure();
+  // sections without a turn share the profile contour, so the rim ends of straight teeth stay as they were
+  const sections = surface.sections.map(({ z, turn }) => ({ z, contour: turn === 0 ? contours.profile : { points: turnContour(surface.points, turn) } }));
 
   const mesh = createMeshBuilder();
   const loops = new Map();
@@ -122,10 +127,15 @@ export function buildPulleyMesh(description, derived) {
 
   /** Working surface, flangeless rim ends and the rim inner surface outside the web levels. */
   function addRim() {
-    const { rimInner, profile } = contours;
-    mesh.wall({ lower: loop(profile, rimLowerZ), upper: loop(profile, rimUpperZ), normal: "outward" });
-    if (!flanges.lower) mesh.annulus({ inner: loop(rimInner, rimLowerZ), outer: loop(profile, rimLowerZ), normal: "-Z" });
-    if (!flanges.upper) mesh.annulus({ inner: loop(rimInner, rimUpperZ), outer: loop(profile, rimUpperZ), normal: "+Z" });
+    const { rimInner } = contours;
+    for (let index = 1; index < sections.length; index += 1) {
+      const [lower, upper] = [sections[index - 1], sections[index]];
+      mesh.wall({ lower: loop(lower.contour, lower.z), upper: loop(upper.contour, upper.z), normal: "outward" });
+    }
+    // a turned end starts on its first tooth, so the ring starts from the inner vertex under it
+    const [lowerEnd, upperEnd] = [surface.sections[0], surface.sections.at(-1)];
+    if (!flanges.lower) mesh.annulus({ inner: startAt(loop(rimInner, rimLowerZ), lowerEnd.turn), outer: loop(sections[0].contour, rimLowerZ), normal: "-Z" });
+    if (!flanges.upper) mesh.annulus({ inner: startAt(loop(rimInner, rimUpperZ), upperEnd.turn), outer: loop(sections.at(-1).contour, rimUpperZ), normal: "+Z" });
     // the inner surface continues through the flanges, which are rings from R_i
     if (shellLowerZ < webLowerZ) mesh.wall({ lower: loop(rimInner, shellLowerZ), upper: loop(rimInner, webLowerZ), normal: "inward" });
     if (webUpperZ < shellUpperZ) mesh.wall({ lower: loop(rimInner, webUpperZ), upper: loop(rimInner, shellUpperZ), normal: "inward" });
@@ -204,6 +214,23 @@ export function buildPulleyMesh(description, derived) {
       mesh.wall({ lower: lowerWindow, upper: windowLoop(spoke, webUpperZ), normal: "inward" });
     }
   }
+}
+
+/**
+ * The same loop starting at its vertex nearest to the clockwise angle; the rim
+ * marks put a vertex exactly there. Angle 0 keeps the loop as it is.
+ */
+function startAt(loop, angle) {
+  if (angle === 0) return loop;
+  const target = [Math.sin(angle), Math.cos(angle)];
+  let start = 0;
+  loop.points.forEach(([x, y], index) => {
+    const [bestX, bestY] = loop.points[start];
+    const along = (x * target[0] + y * target[1]) / Math.hypot(x, y);
+    if (along > (bestX * target[0] + bestY * target[1]) / Math.hypot(bestX, bestY)) start = index;
+  });
+  const turn = (items) => items.map((_, offset) => items[(start + offset) % items.length]);
+  return { ids: turn(loop.ids), points: turn(loop.points) };
 }
 
 /** Vertices of a loop from index `from` to `to` inclusive, stepping by direction (+1 or −1). */

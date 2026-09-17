@@ -3,13 +3,14 @@
   "kind": "gear",
   "units": "mm",
   "rim": {
-    "module": 1,
-    "toothCount": 12,
+    "module": 1.5,
+    "toothCount": 15,
     "pressureAngle": 20,
-    "profileShift": 0.3,
+    "profileShift": 0,
     "backlash": 0.1,
-    "helix": "none",
-    "width": 8,
+    "helix": "helical",
+    "helixAngle": -20,
+    "width": 10,
     "radialThickness": 2
   },
   "flanges": {
@@ -17,15 +18,18 @@
     "upper": null
   },
   "web": {
-    "type": "none"
+    "type": "solid",
+    "thinning": 0,
+    "alignment": "lower",
+    "axialOffset": 0
   },
   "hub": {
-    "outerDiameter": 8,
+    "outerDiameter": 12,
     "lowerExtension": 0,
     "upperExtension": 0
   },
   "bore": { "shape": "dFlat", "diameter": 5.2, "flatDistance": 4.7 },
   "generation": {
-    "maxChordError": 0.02
+    "maxChordError": 0.03
   }
 }

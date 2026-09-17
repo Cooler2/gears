@@ -188,7 +188,7 @@ test("bore rules keep the axis inside and measure the hub wall at the farthest p
   assert.deepEqual(derived.boreExtentX, { positive: 2.5 * Math.cos(Math.PI / 5), negative: 2.5 }, "an odd polygon has a vertex at −X");
 });
 
-test("version 1, 2 and 3 descriptions are read as version 4", async () => {
+test("version 1 to 4 descriptions are read as version 5", async () => {
   const current = await readJson("../examples/valid/spokes-flanged.json");
   // version 3: the web by thickness and mid-plane, hub extensions from the rim ends (flanges 0.8 and 1.2)
   const { thinning, alignment, axialOffset, ...spokes } = current.web;
@@ -217,7 +217,7 @@ test("version 1, 2 and 3 descriptions are read as version 4", async () => {
   const mixed = { ...structuredClone(current), hub: { ...current.hub, boreDiameter: 5 } };
   assert.ok(validateDescription(mixed).diagnostics.some(({ paths }) => paths.includes("/hub/boreDiameter")));
   assert.ok(validateDescription({ ...current, rim }).diagnostics.some(({ paths }) => paths.includes("/rim/toothedWidth")));
-  assert.ok(validateDescription({ ...current, schemaVersion: 5 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+  assert.ok(validateDescription({ ...current, schemaVersion: 6 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
   assert.ok(validateDescription({ ...version3, schemaVersion: 4 }).diagnostics.some(({ paths }) => paths.includes("/web/axialThickness")));
 
   // a version 3 web against a face of the part is aligned to it, any other is centred; the levels stay
@@ -268,12 +268,147 @@ test("an idler pulley has a smooth rim of its diameter and shares the rest", asy
   }
 
   const kindCodes = (description) => validateDescription(description).diagnostics.filter(({ severity }) => severity === "error").map(({ paths }) => paths[0]);
-  assert.deepEqual(kindCodes({ ...input, kind: "gear" }), ["/kind"]);
+  assert.deepEqual(kindCodes({ ...input, kind: "wormGear" }), ["/kind"]);
   assert.deepEqual(kindCodes({ ...input, rim: { ...input.rim, toothCount: 20 } }), ["/rim/toothCount"]);
   assert.deepEqual(kindCodes({ ...input, rim: { ...input.rim, outerDiameter: 4 } }), ["/rim/outerDiameter"]);
   const noInterior = validateDescription(await readJson("../examples/invalid/idler-no-interior.json")).diagnostics;
   assert.deepEqual(noInterior.find(({ code }) => code === "E_RIM_NO_INTERIOR").paths, ["/rim/outerDiameter", "/rim/radialThickness"]);
   assert.ok(noInterior.find(({ code }) => code === "E_RADIAL_ORDER").paths.includes("/rim/outerDiameter"));
+});
+
+test("a version 4 spur gear is read as a gear with straight teeth", async () => {
+  const current = await readJson("../examples/valid/gear-keyed-20t.json");
+  const { helix, ...rim } = current.rim;
+  const legacy = { ...structuredClone(current), schemaVersion: 4, kind: "spurGear", rim };
+  const snapshot = structuredClone(legacy);
+  const result = generatePulley(legacy);
+  assert.deepEqual(legacy, snapshot, "the input is not modified");
+  assert.deepEqual(result.normalized, current);
+  assert.deepEqual(Object.keys(result.normalized.rim), Object.keys(current.rim), "helix follows backlash");
+  assert.deepEqual(result.mesh, generatePulley(current).mesh);
+
+  // version 5 has no spur gear; straight teeth take no angle, inclined ones need it
+  const errors = (changes) => validateDescription({ ...current, ...changes }).diagnostics
+    .filter(({ severity }) => severity === "error").map(({ paths }) => paths[0]);
+  assert.deepEqual(errors({ kind: "spurGear" }), ["/kind"]);
+  assert.deepEqual(errors({ rim: { ...current.rim, helixAngle: 20 } }), ["/rim/helixAngle"]);
+  assert.deepEqual(errors({ rim: { ...current.rim, helix: "helical" } }), ["/rim/helixAngle"]);
+  assert.deepEqual(errors({ rim: { ...current.rim, helix: "spiral", helixAngle: 20 } }), ["/rim/helix"]);
+  assert.deepEqual(errors({ rim: { ...current.rim, helix: "right", helixAngle: 20 } }), ["/rim/helix"], "the hand is the sign of the angle");
+  assert.deepEqual(errors({ rim: { ...current.rim, helix: "helical", helixAngle: -50 } }), ["/rim/helixAngle"]);
+});
+
+test("helical teeth have the normal module and turn with height", async () => {
+  const input = await readJson("../examples/valid/gear-helical-30t.json");
+  const result = generatePulley(input);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  const { derived } = result;
+  const { module: m, toothCount: n, pressureAngle, backlash, helixAngle, width } = input.rim;
+  const beta = helixAngle * Math.PI / 180;
+  const transverseAngle = Math.atan(Math.tan(pressureAngle * Math.PI / 180) / Math.cos(beta));
+  const pitchRadius = m * n / (2 * Math.cos(beta));
+  const close = (actual, expected, label) => assert.ok(Math.abs(actual - expected) < 1e-9, `${label}: ${actual} vs ${expected}`);
+  close(derived.pitchRadius, pitchRadius, "pitch radius");
+  // addendum and dedendum keep their sizes in mm; the base circle follows the transverse pressure angle
+  close(derived.outsideRadius, pitchRadius + m, "tip radius");
+  close(derived.rootRadius, pitchRadius - 1.25 * m, "root radius");
+  close(derived.baseRadius, pitchRadius * Math.cos(transverseAngle), "base radius");
+  close(derived.pitch, Math.PI * m / Math.cos(beta), "transverse pitch");
+  close(derived.lead, 2 * Math.PI * pitchRadius / Math.tan(beta), "lead");
+
+  // across the tooth the tooth is π·m/2 − j thick at the pitch cylinder: s_n = s_t·cos β, measured on the outline
+  // measured on a fine outline, so that the chords cut the flanks by less than the check allows
+  const fine = rimSurface("gear", input.rim, null, 0.001).points;
+  const flankAngle = (side) => {
+    for (let index = 0; index < fine.length; index += 1) {
+      const [a, b] = [fine[index], fine[(index + 1) % fine.length]].map(([x, y]) => [Math.hypot(x, y), Math.atan2(x, y)]);
+      if (Math.sign(a[1]) !== side || Math.abs(a[1]) > Math.PI / n || Math.abs(b[1]) > Math.PI / n) continue;
+      if ((a[0] - pitchRadius) * (b[0] - pitchRadius) <= 0 && a[0] !== b[0]) return a[1] + (b[1] - a[1]) * (pitchRadius - a[0]) / (b[0] - a[0]);
+    }
+    return NaN;
+  };
+  const normalThickness = (flankAngle(1) - flankAngle(-1)) * pitchRadius * Math.cos(beta);
+  assert.ok(Math.abs(normalThickness - (m * Math.PI / 2 - backlash)) < 0.002, `normal thickness ${normalThickness}`);
+
+  // every vertex of the working surface, turned back by the helix, lies on the mid-plane outline:
+  // a right-hand tooth rises counter-clockwise, by z·tan β / R_p
+  const turn = ([x, y], angle) => [x * Math.cos(angle) + y * Math.sin(angle), y * Math.cos(angle) - x * Math.sin(angle)]; // clockwise
+  const outline = rimSurface("gear", input.rim, null, input.generation.maxChordError).points;
+  const { vertices } = result.mesh;
+  const levels = new Set();
+  for (let index = 0; index < vertices.length; index += 3) {
+    const [x, y, z] = vertices.slice(index, index + 3);
+    if (Math.hypot(x, y) < derived.rootRadius - 1e-9) continue;
+    const back = turn([x, y], z * Math.tan(beta) / pitchRadius);
+    const distance = Math.min(...outline.map((point) => Math.hypot(point[0] - back[0], point[1] - back[1])));
+    assert.ok(distance < 1e-9, `vertex ${x}, ${y}, ${z} is ${distance} off the turned outline`);
+    levels.add(z);
+  }
+  assert.ok(levels.has(-width / 2) && levels.has(width / 2) && levels.size >= 3, `section levels ${[...levels]}`);
+});
+
+test("helical hands turn opposite ways, a herringbone meets itself at the mid-plane", async () => {
+  // the tip of the tooth on +Y at the upper rim end: turned clockwise for a left hand (β < 0), counter-clockwise for a right one
+  const left = await readJson("../examples/valid/gear-helical-15t.json");
+  assert.ok(left.rim.helixAngle < 0);
+  for (const helixAngle of [left.rim.helixAngle, -left.rim.helixAngle]) {
+    const input = { ...left, rim: { ...left.rim, helixAngle } };
+    const { mesh, derived } = generatePulley(input);
+    const { toothCount: n, width } = input.rim;
+    const expected = -width / 2 * Math.tan(helixAngle * Math.PI / 180) / derived.pitchRadius;
+    const tooth = 2 * Math.PI / n;
+    const wrapped = expected - tooth * Math.round(expected / tooth);
+    let found = false;
+    for (let index = 0; index < mesh.vertices.length; index += 3) {
+      const [x, y, z] = mesh.vertices.slice(index, index + 3);
+      if (z === width / 2 && Math.abs(Math.hypot(x, y) - derived.outsideRadius) < 1e-9) {
+        // the tip land is an arc around the tooth centre; its middle vertex sits on the centre
+        found ||= Math.abs(Math.atan2(x, y) - wrapped) < 1e-9;
+      }
+    }
+    assert.ok(found, `β ${helixAngle}: a tip at ${wrapped}`);
+  }
+
+  const input = await readJson("../examples/valid/gear-herringbone-32t.json");
+  const result = generatePulley(input);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  const { vertices } = result.mesh;
+  const surfaceAt = (z) => {
+    const points = [];
+    for (let index = 0; index < vertices.length; index += 3) {
+      const [x, y] = vertices.slice(index, index + 2);
+      if (vertices[index + 2] === z && Math.hypot(x, y) > result.derived.rootRadius - 1e-9) points.push([x, y]);
+    }
+    return points.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  };
+  const { width } = input.rim;
+  // both ends are the same section, so the part is symmetric about the mid-plane, where the halves share the plain outline
+  assert.deepEqual(surfaceAt(-width / 2), surfaceAt(width / 2));
+  assert.deepEqual(surfaceAt(0), rimSurface("gear", input.rim, null, input.generation.maxChordError).points.sort((a, b) => a[0] - b[0] || a[1] - b[1]));
+  // the opposite sign is the same part turned over: its ends are the mirror sections, turned the other way
+  const opposite = generatePulley({ ...input, rim: { ...input.rim, helixAngle: -input.rim.helixAngle } });
+  const top = (mesh) => {
+    const points = [];
+    for (let index = 0; index < mesh.vertices.length; index += 3) {
+      const [x, y, z] = mesh.vertices.slice(index, index + 3);
+      if (z === width / 2 && Math.hypot(x, y) > result.derived.rootRadius - 1e-9) points.push([x, y]);
+    }
+    return points;
+  };
+  const tipAngle = (points) => Math.atan2(...points.reduce((best, point) => Math.abs(Math.atan2(...point)) < Math.abs(Math.atan2(...best)) && Math.hypot(...point) > result.derived.outsideRadius - 1e-9 ? point : best,
+    points.find((point) => Math.hypot(...point) > result.derived.outsideRadius - 1e-9)));
+  assert.ok(Math.abs(tipAngle(top(result.mesh)) + tipAngle(top(opposite.mesh))) < 1e-9, "the ends turn opposite ways");
+});
+
+test("helical teeth take the undercut limit of their transverse section", async () => {
+  const input = await readJson("../examples/valid/gear-helical-15t.json");
+  const codes = (rim) => validateDescription({ ...input, rim: { ...input.rim, ...rim } }).diagnostics.map(({ code }) => code);
+  // 2·cos β / sin² α_t: 14.4 teeth at 20°, 11.5 at 30°, against 17.1 for straight teeth
+  assert.deepEqual(codes({ toothCount: 14 }), []);
+  assert.deepEqual(codes({ toothCount: 13 }), ["W_GEAR_UNDERCUT"]);
+  assert.deepEqual(codes({ toothCount: 12, helixAngle: 30 }), []);
+  const { helixAngle, ...straight } = input.rim;
+  assert.deepEqual(validateDescription({ ...input, rim: { ...straight, helix: "none", toothCount: 14 } }).diagnostics.map(({ code }) => code), ["W_GEAR_UNDERCUT"]);
 });
 
 test("a spur gear has involute teeth of the standard rack sizes", async () => {
@@ -326,7 +461,7 @@ test("a spur gear has involute teeth of the standard rack sizes", async () => {
     const half = (r) => (rim.module * (Math.PI / 2 + 2 * rim.profileShift * Math.tan(gear.alpha)) - rim.backlash) / (2 * rp) + involute(gear.alpha) - involute(Math.acos(rb / r));
     const tip = rp + rim.module * (1 + rim.profileShift);
     const start = Math.max(rb, rp - rim.module * (1.25 - rim.profileShift));
-    const flank = rimSurface("spurGear", rim, null, maxChordError).points
+    const flank = rimSurface("gear", rim, null, maxChordError).points
       .map(([x, y]) => [Math.hypot(x, y), Math.atan2(x, y)])
       .filter(([r, angle]) => angle > 0 && angle < Math.PI / rim.toothCount && r >= start - 1e-9 && r <= tip + 1e-9 && Math.abs(angle - half(Math.max(r, rb))) < 1e-9);
     let worst = 0;
@@ -492,14 +627,17 @@ test("every valid example builds a closed solid of the expected size", async () 
     const input = await readJson(`../examples/valid/${name}`);
     const result = generatePulley(input);
     const toothed = input.kind === "timingPulley";
-    const gear = input.kind === "spurGear";
+    const gear = input.kind === "gear";
+    const helical = gear && input.rim.helix !== "none";
     assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
     assert.deepEqual(result.verification.errors, [], name);
     assert.deepEqual(result.diagnostics.map(({ code }) => code), [...(extraWarnings[name] ?? []), ...(toothed ? ["W_EXPERIMENTAL_PROFILE"] : [])], name);
 
     // sizes straight from the contract formulas, not from derive()
     const { rim, flanges, hub } = input;
-    const outsideRadius = toothed ? rim.toothCount / Math.PI - 0.254 : gear ? rim.module * (rim.toothCount / 2 + 1 + rim.profileShift) : rim.outerDiameter / 2;
+    // a helical gear has the normal module: its pitch circle is larger by 1/cos β, the tooth height is the same
+    const pitchRadius = gear ? rim.module * rim.toothCount / 2 / (helical ? Math.cos(rim.helixAngle * Math.PI / 180) : 1) : null;
+    const outsideRadius = toothed ? rim.toothCount / Math.PI - 0.254 : gear ? pitchRadius + rim.module * (1 + rim.profileShift) : rim.outerDiameter / 2;
     // a smooth circle need not have a vertex on the X axis: it may fall short by the chord tolerance
     const tolerance = toothed ? 1e-9 : input.generation.maxChordError;
     const flangeRadii = [flanges.lower, flanges.upper].filter(Boolean).map((flange) => outsideRadius + flange.radialExtension);
@@ -508,8 +646,9 @@ test("every valid example builds a closed solid of the expected size", async () 
     const bottom = -rim.width / 2 - (flanges.lower?.axialThickness ?? 0) - Math.max(hub.lowerExtension, 0);
     const top = rim.width / 2 + (flanges.upper?.axialThickness ?? 0) + Math.max(hub.upperExtension, 0);
     const { min, max } = result.mesh.bounds;
-    // a gear has a tooth tip on +Y, not necessarily on the X axis
-    if (gear) assert.ok(Math.abs(max[1] - radius) < 1e-9 && max[0] <= radius && -min[0] <= radius, `${name}: radius ${max[1]} vs ${radius}`);
+    // a gear has a tooth tip on +Y at the mid-plane, not necessarily on the X axis; helical tips turn away from it
+    if (helical) assert.ok(Math.abs(farthestRadius(result.mesh) - radius) < 1e-9, `${name}: radius ${farthestRadius(result.mesh)} vs ${radius}`);
+    else if (gear) assert.ok(Math.abs(max[1] - radius) < 1e-9 && max[0] <= radius && -min[0] <= radius, `${name}: radius ${max[1]} vs ${radius}`);
     else assert.ok(Math.abs(max[0] - radius) < tolerance && Math.abs(min[0] + radius) < tolerance, `${name}: radius ${max[0]} vs ${radius}`);
     assert.ok(Math.abs(min[2] - bottom) < 1e-12 && Math.abs(max[2] - top) < 1e-12, `${name}: height`);
   }
@@ -548,6 +687,12 @@ test("examples lie flat on their lower face, and a solid one covers it completel
     assert.ok(Math.abs(area - expected) < 1e-9 * expected, `${name}: bottom area ${area} vs ${expected}`);
   }
 });
+
+function farthestRadius({ vertices }) {
+  let radius = 0;
+  for (let index = 0; index < vertices.length; index += 3) radius = Math.max(radius, Math.hypot(vertices[index], vertices[index + 1]));
+  return radius;
+}
 
 function contourArea(points) {
   let area = 0;

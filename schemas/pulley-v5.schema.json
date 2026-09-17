@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gears.local/schemas/pulley-v4.schema.json",
-  "title": "Gears pulley description, version 4",
-  "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley or an involute spur gear. Cross-field geometry rules are defined in docs/contract.md.",
+  "$id": "https://gears.local/schemas/pulley-v5.schema.json",
+  "title": "Gears pulley description, version 5",
+  "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley or an involute gear with straight, helical or herringbone teeth. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,11 +18,11 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 4,
-      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only, version 3 added the idler pulley and the spur gear but placed the web by thickness and mid-plane and measured hub extensions from the rim ends; readers upgrade them. Version 4 places the web and the hub against the faces of the part."
+      "const": 5,
+      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only, version 3 added the idler pulley and the spur gear but placed the web by thickness and mid-plane and measured hub extensions from the rim ends; readers upgrade them. Version 4 placed the web and the hub against the faces of the part. Version 5 renames spurGear to gear and adds helical teeth; a version 4 gear gets rim.helix \"none\"."
     },
     "kind": {
-      "enum": ["timingPulley", "idlerPulley", "spurGear"],
+      "enum": ["timingPulley", "idlerPulley", "gear"],
       "description": "Part kind; it selects the rim. Flanges (absent on a gear), web, hub and bore are shared."
     },
     "units": {
@@ -71,7 +71,7 @@
       "then": { "properties": { "rim": { "$ref": "#/$defs/idlerRim" } } }
     },
     {
-      "if": { "properties": { "kind": { "const": "spurGear" } } },
+      "if": { "properties": { "kind": { "const": "gear" } } },
       "then": {
         "properties": {
           "rim": { "$ref": "#/$defs/gearRim" },
@@ -138,14 +138,17 @@
     "gearRim": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["module", "toothCount", "pressureAngle", "profileShift", "backlash", "width", "radialThickness"],
+      "required": ["module", "toothCount", "pressureAngle", "profileShift", "backlash", "helix", "width", "radialThickness"],
+      "if": { "properties": { "helix": { "const": "none" } } },
+      "then": { "not": { "required": ["helixAngle"] } },
+      "else": { "required": ["helixAngle"] },
       "properties": {
         "module": {
           "type": "number",
           "minimum": 0.3,
           "maximum": 10,
           "default": 1,
-          "description": "Module m in mm: pitch diameter is m·toothCount, circular pitch π·m. Mating gears share the module and the pressure angle."
+          "description": "Normal module m in mm, across the tooth: pitch diameter is m·toothCount/cos β, circular pitch along the pitch circle π·m/cos β. Mating gears share the module, the pressure angle and the helix angle."
         },
         "toothCount": {
           "type": "integer",
@@ -159,7 +162,7 @@
           "minimum": 14.5,
           "maximum": 30,
           "default": 20,
-          "description": "Pressure angle of the basic rack, degrees."
+          "description": "Pressure angle of the basic rack, degrees; for helical teeth the normal one."
         },
         "profileShift": {
           "type": "number",
@@ -173,7 +176,19 @@
           "minimum": 0,
           "maximum": 1,
           "default": 0.1,
-          "description": "Thinning of every tooth along the pitch circle, mm; a pair at the standard centre distance gets the sum of both gears as play."
+          "description": "Thinning of every tooth along the pitch circle, mm, across the tooth for helical teeth; a pair at the standard centre distance gets the sum of both gears as play."
+        },
+        "helix": {
+          "enum": ["none", "helical", "herringbone"],
+          "default": "none",
+          "description": "Teeth: straight, helical, or herringbone: two helical halves of opposite hands meeting at the mid-plane without a gap. The hand is the sign of helixAngle."
+        },
+        "helixAngle": {
+          "type": "number",
+          "minimum": -45,
+          "maximum": 45,
+          "default": 20,
+          "description": "Helix angle β at the pitch cylinder, degrees; present only when helix is not none. Positive is right-hand: the tooth rises counter-clockwise seen from +Z, like a right-hand thread; a herringbone takes the hand of its lower half. Mating gears on parallel axes have opposite signs; 0 gives straight teeth."
         },
         "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
         "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }

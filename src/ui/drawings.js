@@ -10,7 +10,8 @@
 // group; regions that explain a switch (flange, web type) also carry data-path.
 
 import { circleSegmentCount } from "../core/contours.js";
-import { buildSpurGearContour, spurGearGeometry } from "../core/involute.js";
+import { buildGearContour, gearGeometry } from "../core/involute.js";
+import { helixTurn } from "../core/rims.js";
 import { FIELD_BY_PATH, fieldLabel } from "./fields.js";
 import { escapeHtml, formatNumber, splitSymbol } from "./format.js";
 
@@ -169,7 +170,7 @@ export function renderPlan(model, ctx) {
   }
 
   // T_r to the lower right, along a groove of a pulley or a space between gear teeth
-  const spaceOffset = normalized.kind === "spurGear" ? Math.PI / rim.toothCount : 0;
+  const spaceOffset = normalized.kind === "gear" ? Math.PI / rim.toothCount : 0;
   const rimAngle = toothed ? 2 * Math.PI * Math.round(rim.toothCount * 3 / 8) / rim.toothCount + spaceOffset : 3 * Math.PI / 4;
   const rimDirection = polar(1, rimAngle);
   out.push(dimension(ctx, "/rim/radialThickness", {
@@ -290,14 +291,17 @@ function spokeDimensions(ctx, plan, web, u, outer) {
 /**
  * A few gear teeth around the one on +Y, at a larger scale, for the tooth sizes.
  * The outline is cut by a frame; the frame alone is measured when the view is cropped.
+ * Inclined teeth are shown in the transverse section, where the pitch and the
+ * pressure angle are larger than the normal ones the fields hold.
  */
 export function renderTooth(model, ctx) {
   const { rim } = model.normalized;
-  const gear = spurGearGeometry(rim);
-  const nominal = spurGearGeometry({ ...rim, backlash: 0 });
+  const gear = gearGeometry(rim);
+  const nominal = gearGeometry({ ...rim, backlash: 0 });
+  const inclined = gear.helix > 0;
   const m = rim.module;
   const step = 2 * Math.PI / rim.toothCount; // tooth centre to tooth centre
-  const pitch = Math.PI * m;
+  const pitch = Math.PI * gear.transverseModule;
   const u = pitch / 8;
   const halfWidth = 1.3 * pitch;
   const top = gear.fullTip + 0.6 * m;
@@ -310,7 +314,7 @@ export function renderTooth(model, ctx) {
   if (rim.profileShift !== 0) inside.push(`<path class="nominal-line" d="${circlePath(gear.pitch + rim.profileShift * m)}"/>`);
   if (rim.backlash > 0) {
     // the central tooth without thinning, dashed, from its left root to its right root
-    const outline = buildSpurGearContour({ ...rim, backlash: 0 }, 0.005 * m)
+    const outline = buildGearContour({ ...rim, backlash: 0 }, 0.005 * m)
       .filter((point) => point[1] > 0 && Math.abs(angleOf(point)) < step / 2)
       .sort((a, b) => angleOf(a) - angleOf(b));
     inside.push(`<path class="nominal-line" d="M${outline.map(P).join("L")}"/>`);
@@ -325,14 +329,14 @@ export function renderTooth(model, ctx) {
     u, a: pitchA, b: pitchB, value: m,
     ext: [0, step].map((angle) => [polar(gear.fullTip + 0.3 * u, angle), polar(level + 0.4 * u, angle)]),
     label: add(pitchMiddle, [0, 1.1 * u]), anchor: "middle",
-    extra: `<text class="note" x="${f(pitchMiddle[0])}" y="${f(-(pitchMiddle[1] + 2.2 * u))}" text-anchor="middle">шаг πm = ${escapeHtml(formatNumber(pitch))}</text>`
+    extra: `<text class="note" x="${f(pitchMiddle[0])}" y="${f(-(pitchMiddle[1] + 2.2 * u))}" text-anchor="middle">${inclined ? "шаг в торце πm/cos β" : "шаг πm"} = ${escapeHtml(formatNumber(pitch))}</text>`
   }));
 
   // α: at the pitch point of the left flank, between the tangent to the pitch circle
   // and the line of action, the flank normal that touches the base circle
   const pitchHalf = gear.halfAngle(gear.pitch);
   const point = polar(gear.pitch, -pitchHalf);
-  const touch = polar(gear.base, -pitchHalf + rim.pressureAngle * Math.PI / 180);
+  const touch = polar(gear.base, -pitchHalf + gear.transversePressureAngle);
   const action = unit(sub(point, touch));
   const tangent = perp(unit(point)); // along the pitch circle, away from the tooth
   const arc = Array.from({ length: 9 }, (_, index) => add(point, mul(unit(add(mul(tangent, 1 - index / 8), mul(action, index / 8))), 2.2 * u)));
@@ -342,7 +346,9 @@ export function renderTooth(model, ctx) {
     `<path class="dim-ext" d="M${P(add(point, mul(action, -2 * u)))}L${P(add(point, mul(action, 3 * u)))}M${P(add(point, mul(tangent, -1.5 * u)))}L${P(add(point, mul(tangent, 3 * u)))}"/>` +
     `<path class="dim-line" d="${arcPath}"/><path class="dim-hit" d="${arcPath}"/>` +
     `<path class="dim-ext" d="M${P(arc[4])}L${P(angleLabel)}"/>` +
-    labelMarkup("/rim/pressureAngle", rim.pressureAngle, add(angleLabel, [-0.3 * u, 0]), "end")));
+    labelMarkup("/rim/pressureAngle", rim.pressureAngle, add(angleLabel, [-0.3 * u, 0]), "end") +
+    // the section angle under the normal one the field holds
+    (inclined ? `<text class="note" x="${f(angleLabel[0] - 0.3 * u)}" y="${f(-(angleLabel[1] - 1.2 * u))}" text-anchor="end">в торце ${escapeHtml(formatNumber(gear.transversePressureAngle * 180 / Math.PI))}</text>` : "")));
 
   // x: the rack datum moved from the pitch circle, in the space right of the tooth;
   // j: the thinning at the pitch circle on the right flank, against the dashed tooth
@@ -365,6 +371,62 @@ export function renderTooth(model, ctx) {
   const defs = `<clipPath id="tooth-detail"><path d="${frame}"/></clipPath>`;
   const box = [-halfWidth - 7 * u, -(level + 3.2 * u), 2 * halfWidth + 14 * u, level + 3.2 * u - bottom + u];
   return svgRoot(box, u, out.join(""), "Зубья крупно", defs);
+}
+
+// -------------------------------------------------------------- helix view
+
+/**
+ * The rim seen from the side, from −Y, with the centre lines of the teeth on the
+ * pitch cylinder: vertical for straight teeth, helices for inclined ones. Only the
+ * near half of every line is drawn; there a helix leaves the axis direction at β.
+ */
+export function renderHelix(model, ctx) {
+  const { rim } = model.normalized;
+  const { outsideRadius: outside, pitchRadius: pitch } = model.derived;
+  const halfWidth = rim.width / 2;
+  const u = Math.max(2 * outside, 1.4 * rim.width) / 19;
+  const lineOf = (tooth, z) => {
+    const angle = 2 * Math.PI * tooth / rim.toothCount + helixTurn(rim, z);
+    return { x: pitch * Math.sin(angle), near: Math.cos(angle) < 0 };
+  };
+
+  const out = [part(ctx, "rim", rectPath(-outside, -halfWidth, outside, halfWidth), { path: "/rim/helix", extra: "part-teeth" })];
+  const samples = 48;
+  const lines = [];
+  for (let tooth = 0; tooth < rim.toothCount; tooth += 1) {
+    let run = [];
+    for (let index = 0; index <= samples; index += 1) {
+      const z = -halfWidth + rim.width * index / samples;
+      const { x, near } = lineOf(tooth, z);
+      if (near) run.push([x, z]);
+      if ((!near || index === samples) && run.length) {
+        if (run.length > 1) lines.push(`M${run.map(P).join("L")}`);
+        run = [];
+      }
+    }
+  }
+  out.push(`<path class="tooth-line" d="${lines.join("")}"/>`);
+  out.push(`<path class="centre-line" d="M${P([0, -halfWidth - u])}L${P([0, halfWidth + u])}"/>`);
+
+  // β at the tooth nearest the front, low enough for the arc to stay on the rim;
+  // on a herringbone above the mid-plane, clear of the kink
+  const level = rim.helix === "herringbone" ? 0.15 * halfWidth : -0.5 * halfWidth;
+  const front = Math.round(rim.toothCount / 2 - helixTurn(rim, level) * rim.toothCount / (2 * Math.PI));
+  const point = [lineOf(front, level).x, level];
+  const delta = rim.width / samples;
+  const tangent = unit([(lineOf(front, level + delta).x - lineOf(front, level - delta).x) / (2 * delta), 1]);
+  const radius = Math.min(0.7 * (halfWidth - level), 3 * u);
+  const arc = Array.from({ length: 9 }, (_, index) => add(point, mul(unit(add(mul([0, 1], 1 - index / 8), mul(tangent, index / 8))), radius)));
+  const arcPath = `M${arc.map(P).join("L")}`;
+  const labelAt = [point[0] + 2.5 * u, halfWidth + 1.5 * u];
+  out.push(wrap(ctx, "/rim/helixAngle", rim.helixAngle,
+    `<path class="dim-ext" d="M${P(point)}L${P(add(point, [0, radius + 0.8 * u]))}M${P(point)}L${P(add(point, mul(tangent, radius + 0.8 * u)))}"/>` +
+    `<path class="dim-line" d="${arcPath}"/><path class="dim-hit" d="${arcPath}"/>` +
+    `<path class="dim-ext" d="M${P(arc[4])}L${P(labelAt)}"/>` +
+    labelMarkup("/rim/helixAngle", rim.helixAngle, add(labelAt, [0.3 * u, 0]), "start")));
+
+  const box = [-outside - 7 * u, -(halfWidth + 3 * u), 2 * outside + 14 * u, rim.width + 6 * u];
+  return svgRoot(box, u, out.join(""), "Зубья сбоку");
 }
 
 // ------------------------------------------------------------- section view

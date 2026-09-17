@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 4,
-  "kind": "spurGear",
+  "schemaVersion": 5,
+  "kind": "gear",
   "units": "mm",
   "rim": {
     "module": 1.5,
@@ -8,6 +8,7 @@
     "pressureAngle": 20,
     "profileShift": 0,
     "backlash": 0.15,
+    "helix": "none",
     "width": 10,
     "radialThickness": 3
   },

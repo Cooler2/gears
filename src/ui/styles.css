@@ -691,6 +691,13 @@ figcaption {
   pointer-events: none;
 }
 
+.tooth-line {
+  stroke: var(--ink);
+  stroke-width: 0.8px;
+  fill: none;
+  pointer-events: none;
+}
+
 .nominal-line {
   stroke: var(--muted);
   stroke-width: 0.8px;

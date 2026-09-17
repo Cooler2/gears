@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildPlanView, validateDescription } from "../src/core/generate.js";
-import { chordSummary, renderChord, renderPlan, renderSection, renderTooth } from "../src/ui/drawings.js";
+import { chordSummary, renderChord, renderHelix, renderPlan, renderSection, renderTooth } from "../src/ui/drawings.js";
 import { FIELD_BY_PATH, FIELDS, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle } from "../src/ui/fields.js";
 import { formatNumber, inputText, plural, splitSymbol } from "../src/ui/format.js";
 import { diagnosticKind, diagnosticText } from "../src/ui/messages.js";
 import { PRESETS } from "../src/ui/presets.js";
-import { createState, getValue, keepShaft, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setValue, setWebType } from "../src/ui/state.js";
+import { createState, getValue, keepShaft, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setHelix, setValue, setWebType } from "../src/ui/state.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
-const schema = await readJson("../schemas/pulley-v4.schema.json");
+const schema = await readJson("../schemas/pulley-v5.schema.json");
 const exampleNames = async (kind) => (await readdir(new URL(`../examples/${kind}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();
 const numeric = (field) => !field.kind;
 
@@ -68,8 +68,8 @@ test("each visible numeric field has a dimension on the drawings of its group", 
     assert.equal(model.ok, true, name);
     for (const { id: group } of groupsOf(model.normalized).filter(({ id }) => id !== "presets")) {
       const ctx = contextFor(model, group);
-      const teeth = group === "rim" && model.normalized.kind === "spurGear";
-      const drawings = [renderPlan(model, ctx), renderSection(model, ctx), group === "generation" ? renderChord(model, ctx) : "", teeth ? renderTooth(model, ctx) : ""].map(dimensionPaths);
+      const teeth = group === "rim" && model.normalized.kind === "gear";
+      const drawings = [renderPlan(model, ctx), renderSection(model, ctx), group === "generation" ? renderChord(model, ctx) : "", teeth ? renderTooth(model, ctx) : "", teeth ? renderHelix(model, ctx) : ""].map(dimensionPaths);
       const drawn = drawings.flat();
       const expected = [...ctx.visible].filter((path) => numeric(FIELDS.find((field) => field.path === path)));
       // a size may appear on both views (the diameters do), but once per view
@@ -224,8 +224,17 @@ test("each kind has valid defaults, variants, its own rim fields and words", asy
   const paths = (description) => fieldsOf("rim", description).map(({ path }) => path);
   assert.deepEqual(paths(timing), ["/rim/toothCount", "/rim/width", "/rim/radialThickness"]);
   assert.deepEqual(paths(idler), ["/rim/outerDiameter", "/rim/width", "/rim/radialThickness"]);
-  const gear = createState(schema, "spurGear").description;
-  assert.deepEqual(paths(gear), ["/rim/module", "/rim/toothCount", "/rim/pressureAngle", "/rim/profileShift", "/rim/backlash", "/rim/width", "/rim/radialThickness"]);
+  const gear = createState(schema, "gear").description;
+  assert.deepEqual(paths(gear), ["/rim/module", "/rim/toothCount", "/rim/pressureAngle", "/rim/profileShift", "/rim/backlash", "/rim/helix", "/rim/width", "/rim/radialThickness"]);
+  const helical = setHelix(createState(schema, "gear"), "helical").description;
+  assert.deepEqual(paths(helical).slice(5, 7), ["/rim/helix", "/rim/helixAngle"]);
+  assert.deepEqual(Object.keys(helical.rim).slice(5, 7), ["helix", "helixAngle"], "the angle follows the hand in the file");
+  assert.equal(validateDescription(helical).ok, true);
+  const steeper = setValue(setHelix(createState(schema, "gear"), "helical"), "/rim/helixAngle", -35);
+  const straight = setHelix(steeper, "none");
+  assert.ok(!Object.hasOwn(straight.description.rim, "helixAngle"), "straight teeth have no angle");
+  assert.equal(setHelix(straight, "herringbone").description.rim.helixAngle, -35, "the angle comes back with inclined teeth, with its hand");
+  assert.equal(fieldSchema(schema, FIELD_BY_PATH.get("/rim/helixAngle"), helical).minimum, -45, "a negative angle is a left hand");
   assert.equal(fieldSchema(schema, FIELD_BY_PATH.get("/rim/toothCount"), gear).minimum, 6, "a gear takes fewer teeth than a pulley");
   assert.equal(fieldSchema(schema, FIELD_BY_PATH.get("/rim/toothCount"), timing).minimum, 14);
   assert.ok(!groupsOf(gear).some(({ id }) => id === "flanges"), "a gear has no flanges");

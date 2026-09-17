@@ -11,12 +11,12 @@
 import { buildPlanView, validateDescription } from "../core/generate.js";
 import { exportBinaryStl } from "../export/stl.js";
 import { BuildClient } from "../worker/client.js";
-import { chordSummary, renderChord, renderPlan, renderSection, renderTooth } from "./drawings.js";
+import { chordSummary, renderChord, renderHelix, renderPlan, renderSection, renderTooth } from "./drawings.js";
 import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle, kindOf } from "./fields.js";
 import { escapeHtml, formatNumber, inputText, plural, symbolHtml } from "./format.js";
 import { diagnosticKind, diagnosticText } from "./messages.js";
 import { PRESETS } from "./presets.js";
-import { createState, defaultDescription, getValue, keepShaft, loadDescription, parseNumber, restoreState as upgradeState, setBoreShape, setFlange, setValue, setWebType } from "./state.js";
+import { createState, defaultDescription, getValue, keepShaft, loadDescription, parseNumber, restoreState as upgradeState, setBoreShape, setFlange, setHelix, setValue, setWebType } from "./state.js";
 import { MeshViewer } from "./viewer.js";
 
 const STORAGE_KEY = "gears.pulley.form.v1";
@@ -24,14 +24,14 @@ const SECTION_FIRST = new Set(["flanges", "hub"]);
 const MAX_FILE_BYTES = 1 << 20; // a description is well under a kilobyte
 const BUILD_TIMEOUT_MS = 20000;
 const CONTEXT_VIEW_SCALE = 0.6; // labels of a view with no sizes of its own, relative to the main one
-const PRESET_KIND_ORDER = ["spurGear", "timingPulley", "idlerPulley"]; // gears open the variants page
+const PRESET_KIND_ORDER = ["gear", "timingPulley", "idlerPulley"]; // gears open the variants page
 const PREVIEW_TAGS = { fresh: "по текущим параметрам", building: "строится…", invalid: "устарела", failed: "не построена", crashed: "сбой" };
 const $ = (selector) => document.querySelector(selector);
 const el = {
   nav: $("#groups"), title: $("#group-title"), form: $("#form"), sizes: $("#sizes"), status: $("#status"), drawings: $("#drawings"),
   plan: $("#plan"), section: $("#section"), sectionTag: $("#section-tag"), planTag: $("#plan-tag"),
   chordFigure: $("#chord-figure"), chord: $("#chord"), planFigure: $("#plan-figure"), sectionFigure: $("#section-figure"),
-  toothFigure: $("#tooth-figure"), tooth: $("#tooth"),
+  toothFigure: $("#tooth-figure"), tooth: $("#tooth"), toothTag: $("#tooth-tag"), helixFigure: $("#helix-figure"), helix: $("#helix"),
   stale: $("#stale"), file: $("#file-input"), notice: $("#notice"),
   viewport: $("#viewport"), canvas: $("#viewer"), previewState: $("#preview-state"), overlay: $("#preview-overlay"),
   previewInfo: $("#preview-info"), retry: $("#retry"), stl: $("#download-stl"),
@@ -40,7 +40,7 @@ const el = {
 
 let schema, presets;
 try {
-  schema = await fetchJson("../../schemas/pulley-v4.schema.json");
+  schema = await fetchJson("../../schemas/pulley-v5.schema.json");
   presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(`../../examples/valid/${preset.file}`) })));
 } catch (error) {
   $("#boot").className = "notice notice-error";
@@ -273,8 +273,9 @@ function computedMarkup() {
   const rows = {
     rim: {
       idlerPulley: [["Внутренний диаметр обода", rimInner]],
-      spurGear: [["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр вершин", 2 * derived.outsideRadius], ["Диаметр впадин", 2 * derived.rootRadius],
-        ["Основной диаметр", 2 * derived.baseRadius], ["Шаг по делительной окружности", derived.pitch], ["Внутренний диаметр венца", rimInner]],
+      gear: [["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр вершин", 2 * derived.outsideRadius], ["Диаметр впадин", 2 * derived.rootRadius],
+        ["Основной диаметр", 2 * derived.baseRadius], [derived.lead === null ? "Шаг по делительной окружности" : "Шаг по делительной окружности в торце", derived.pitch],
+        ["Торцевой модуль", derived.lead === null ? null : derived.transverseModule], ["Ход винтовой линии зуба", derived.lead], ["Внутренний диаметр венца", rimInner]],
       timingPulley: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", rimInner]]
     }[model.normalized.kind],
     flanges: [["Диаметр нижнего фланца", derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], ["Диаметр верхнего фланца", derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], ["Полная высота детали", derived.bounds.max[2] - derived.bounds.min[2]]],
@@ -397,8 +398,8 @@ function drawingContext() {
 function renderDrawings() {
   el.stale.hidden = Boolean(result.normalized);
   if (!model) {
-    el.plan.innerHTML = el.section.innerHTML = el.tooth.innerHTML = "";
-    el.toothFigure.hidden = true;
+    el.plan.innerHTML = el.section.innerHTML = el.tooth.innerHTML = el.helix.innerHTML = "";
+    el.toothFigure.hidden = el.helixFigure.hidden = true;
     return;
   }
   const ctx = drawingContext();
@@ -418,12 +419,16 @@ function renderDrawings() {
     : model.plan.spokes?.schematic ? "спицы схематично: скругления не помещаются" : "в масштабе";
   el.sectionTag.textContent = model.normalized.web.type === "spokes" ? "в масштабе, спицы — разрез по спице" : "в масштабе";
   // gear teeth get a larger view of their own sizes
-  const teeth = view.group === "rim" && model.normalized.kind === "spurGear";
-  el.toothFigure.hidden = !teeth;
+  const teeth = view.group === "rim" && model.normalized.kind === "gear";
+  el.toothFigure.hidden = el.helixFigure.hidden = !teeth;
   el.tooth.innerHTML = teeth ? renderTooth(model, ctx) : "";
+  el.helix.innerHTML = teeth ? renderHelix(model, ctx) : "";
   if (teeth) {
-    cropToContent(el.tooth.querySelector("svg"));
-    setLabelSpan(el.toothFigure, 1);
+    el.toothTag.textContent = model.normalized.rim.helix === "none" ? "в масштабе" : "торцевое сечение, в масштабе";
+    for (const [figure, drawing] of [[el.toothFigure, el.tooth], [el.helixFigure, el.helix]]) {
+      cropToContent(drawing.querySelector("svg"));
+      setLabelSpan(figure, 1);
+    }
   }
   el.chordFigure.hidden = view.group !== "generation";
   if (view.group === "generation") el.chord.innerHTML = renderChord(model, ctx);
@@ -581,6 +586,9 @@ el.form.addEventListener("change", (event) => {
   } else if (input.type === "radio" && path === "/web/type") {
     update(setWebType(state, input.value), { rebuildForm: true });
     focusField(path);
+  } else if (input.type === "radio" && path === "/rim/helix") {
+    update(setHelix(state, input.value), { rebuildForm: true });
+    focusField(path);
   } else if (input.type === "radio" && path === "/bore/shape") {
     update(setBoreShape(state, input.value), { rebuildForm: true });
     focusField(path);
@@ -646,7 +654,7 @@ el.status.addEventListener("click", (event) => {
 });
 
 // drawings: a dimension focuses its field, a part opens its group
-for (const container of [el.plan, el.section, el.chord, el.tooth]) {
+for (const container of [el.plan, el.section, el.chord, el.tooth, el.helix]) {
   container.addEventListener("click", (event) => pickFromDrawing(event.target));
   container.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -708,7 +716,9 @@ el.retry.addEventListener("click", () => {
 function partFileName({ kind, rim }) {
   const number = (value) => String(value).replace(".", "_");
   if (kind === "idlerPulley") return `idler-${number(rim.outerDiameter)}mm`;
-  return kind === "spurGear" ? `gear-m${number(rim.module)}-${rim.toothCount}t` : `pulley-${rim.toothCount}t`;
+  const hand = rim.helixAngle > 0 ? "-right" : rim.helixAngle < 0 ? "-left" : "";
+  const teeth = { none: "", helical: hand, herringbone: `-herringbone${hand}` }[rim.helix];
+  return kind === "gear" ? `gear-m${number(rim.module)}-${rim.toothCount}t${teeth}` : `pulley-${rim.toothCount}t`;
 }
 
 function download(blob, name) {
