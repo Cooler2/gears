@@ -50,9 +50,9 @@ test("the built site has both pages at its root and every module import resolves
       assert.ok(page.includes(`<link rel="canonical" href="https://apus-software.com/gears/${address}">`), name);
       // the link preview points at the same address and at a picture the site has
       assert.ok(page.includes(`<meta property="og:url" content="https://apus-software.com/gears/${address}">`), name);
-      const [, image] = page.match(/<meta property="og:image" content="https:\/\/apus-software\.com\/gears\/([^"]+)">/) ?? [];
-      assert.ok(image, `${name}: no og:image`);
-      await stat(join(out, image)).catch(() => assert.fail(`${name}: ${image} is missing`));
+      const images = [...page.matchAll(/<meta property="og:image" content="https:\/\/apus-software\.com\/gears\/([^"]+)">/g)].map(([, image]) => image);
+      assert.ok(images.length, `${name}: no og:image`);
+      for (const image of images) await stat(join(out, image)).catch(() => assert.fail(`${name}: ${image} is missing`));
       await assert.rejects(stat(join(out, "src/ui", name)));
     }
     await assert.rejects(stat(join(out, "tests")));
