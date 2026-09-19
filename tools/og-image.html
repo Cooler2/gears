@@ -1,0 +1,78 @@
+<!doctype html>
+<!-- Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE -->
+<!--
+  The picture for link previews (Open Graph), 1200×630, drawn by the generator itself.
+  With npm run ui running, render both languages with headless Chrome:
+    chrome --headless=new --window-size=1200,630 --hide-scrollbars --screenshot=src/ui/og-en.png "http://127.0.0.1:8517/tools/og-image.html?lang=en"
+    chrome --headless=new --window-size=1200,630 --hide-scrollbars --screenshot=src/ui/og-ru.png "http://127.0.0.1:8517/tools/og-image.html?lang=ru"
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gears: link preview</title>
+  <link rel="stylesheet" href="../src/ui/styles.css">
+  <style>
+    html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: var(--bg); }
+    .card { display: flex; width: 1200px; height: 630px; color: var(--text); }
+    .text { flex: 0 0 610px; padding: 52px 0 48px 60px; display: flex; flex-direction: column; box-sizing: border-box; }
+    .name { font-size: 34px; font-weight: 700; color: var(--accent); letter-spacing: 0.02em; }
+    h1 { margin: 18px 0 0; font-size: 54px; line-height: 1.1; font-weight: 700; white-space: pre-line; }
+    p { margin: 24px 0 0; font-size: 36px; line-height: 1.3; color: var(--muted); }
+    .site { margin-top: auto; font-size: 34px; color: var(--accent); }
+    .art { flex: 1; }
+    .art svg { width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+  <div class="text">
+    <div class="name">Gears</div>
+    <h1 id="title"></h1>
+    <p id="lead"></p>
+    <div class="site">https://apus-software.com/gears</div>
+  </div>
+  <!-- preset-thumb: the site's strokes that keep their width at any scale -->
+  <div class="art preset-thumb" id="art"></div>
+  </div>
+  <script type="module">
+    import { buildPlanView, validateDescription } from "../src/core/generate.js";
+    import { renderPlan } from "../src/ui/drawings.js";
+
+    const TEXTS = {
+      en: { title: "Gear and pulley generator", lead: "Print-ready models of gears, pulleys and other drive parts, right in the browser." },
+      ru: { title: "Генератор шестерён\nи шкивов", lead: "Модели шестерён, шкивов и других деталей передач для 3D‑печати, прямо в браузере." }
+    };
+    const lang = new URLSearchParams(location.search).get("lang") === "ru" ? "ru" : "en";
+    document.documentElement.lang = lang;
+    document.getElementById("title").textContent = TEXTS[lang].title;
+    document.getElementById("lead").textContent = TEXTS[lang].lead;
+
+    /** The plan view of an example without sizes and centre lines, in millimetres around the axis. */
+    async function partOf(name) {
+      const description = await (await fetch(`../examples/valid/${name}`)).json();
+      const checked = validateDescription(description);
+      const ctx = { visible: new Set(), focus: null, errors: new Set(), advice: new Set(), group: null, description: checked.normalized };
+      const svg = new DOMParser().parseFromString(renderPlan({ ...checked, plan: buildPlanView(checked.normalized, checked.derived) }, ctx), "image/svg+xml").documentElement;
+      svg.querySelectorAll(".centre-line, .pitch-line").forEach((node) => node.remove());
+      return { markup: svg.innerHTML, rim: checked.normalized.rim };
+    }
+
+    // a meshing pair of the same module, a GT2 and a smooth pulley; the centre distance allows for the pinion's profile shift
+    const [wheel, pinion, pulley, idler] = await Promise.all(["gear-spokes-60t.json", "gear-motor-12t.json", "trial-60t.json", "idler-spokes.json"].map(partOf));
+    const m = wheel.rim.module;
+    const centres = m * (wheel.rim.toothCount + pinion.rim.toothCount) / 2 + pinion.rim.profileShift * m;
+    const place = (part, [x, y], turn = 0) => `<g transform="translate(${x} ${y}) rotate(${turn})">${part.markup}</g>`;
+    // the wheel runs off the corner, the pinion meshes with it up and to the left: rolling without slip
+    // turns the pinion by the line angle times (1 + z1/z2), and half a pitch puts its space against a wheel tooth
+    const wheelAt = [42, 46], line = -0.75 * Math.PI;
+    const pinionAt = [wheelAt[0] + centres * Math.cos(line), wheelAt[1] + centres * Math.sin(line)];
+    const pinionTurn = 180 / pinion.rim.toothCount + (line * 180 / Math.PI) * (1 + wheel.rim.toothCount / pinion.rim.toothCount);
+    document.getElementById("art").innerHTML = `<svg viewBox="-38 -52 125 105" xmlns="http://www.w3.org/2000/svg">
+      ${place(wheel, wheelAt)}
+      ${place(pinion, pinionAt, pinionTurn)}
+      ${place(pulley, [58, -28])}
+      ${place(idler, [-8, -28])}
+    </svg>`;
+  </script>
+</body>
+</html>

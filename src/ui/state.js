@@ -150,7 +150,7 @@ export function restoreState(schema, saved) {
   };
 }
 
-/** Number typed by a person: accepts a decimal comma and a typographic minus; NaN otherwise. */
+/** Number typed by a person: a decimal comma is read as a point, a typographic minus as a minus; NaN otherwise. */
 export function parseNumber(text) {
   const normalized = String(text).trim().replace(",", ".").replace("−", "-");
   return normalized === "" ? NaN : Number(normalized);

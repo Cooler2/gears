@@ -14,8 +14,9 @@ import { exportBinaryStl } from "../export/stl.js";
 import { GENERATOR, VERSION } from "../about.js";
 import { BuildClient } from "../worker/client.js";
 import { chordSummary, renderChord, renderHelix, renderPlan, renderSection, renderTooth } from "./drawings.js";
-import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle, kindOf } from "./fields.js";
-import { escapeHtml, formatNumber, inputText, plural, symbolHtml } from "./format.js";
+import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldOptions, fieldSchema, fieldsOf, fieldUnit, groupOfPath, groupsOf, groupTitle, kindOf } from "./fields.js";
+import { escapeHtml, formatCount, formatNumber, inputText, symbolHtml } from "./format.js";
+import { T } from "./locale.js";
 import { diagnosticKind, diagnosticText } from "./messages.js";
 import { PRESETS } from "./presets.js";
 import { createState, defaultDescription, getValue, keepShaft, loadDescription, parseNumber, restoreState as upgradeState, setBoreShape, setFlange, setHelix, setValue, setWebType } from "./state.js";
@@ -27,7 +28,6 @@ const MAX_FILE_BYTES = 1 << 20; // a description is well under a kilobyte
 const BUILD_TIMEOUT_MS = 20000;
 const CONTEXT_VIEW_SCALE = 0.6; // labels of a view with no sizes of its own, relative to the main one
 const PRESET_KIND_ORDER = ["gear", "timingPulley", "idlerPulley"]; // gears open the variants page
-const PREVIEW_TAGS = { fresh: "по текущим параметрам", building: "строится…", invalid: "устарела", failed: "не построена", crashed: "сбой" };
 const $ = (selector) => document.querySelector(selector);
 const el = {
   nav: $("#groups"), title: $("#group-title"), form: $("#form"), sizes: $("#sizes"), status: $("#status"), drawings: $("#drawings"),
@@ -47,7 +47,7 @@ try {
   presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(new URL(`../../examples/valid/${preset.file}`, import.meta.url)) })));
 } catch (error) {
   $("#boot").className = "notice notice-error";
-  $("#boot").textContent = `Не удалось загрузить схему или примеры (${error.message}). Страница должна раздаваться из корня проекта: npm run ui.`;
+  $("#boot").textContent = T.page.bootFailed(error.message);
   throw error;
 }
 $("#boot").hidden = true;
@@ -165,7 +165,7 @@ function renderHeader() {
   const kind = kindOf(state.description);
   el.partTitle.textContent = kind.title;
   el.profileBadge.hidden = !kind.experimental;
-  document.title = `${kind.title} — генератор`;
+  document.title = T.page.title(kind.title);
 }
 
 /** Diagnostics without the permanent profile warning, which lives in the header. */
@@ -186,8 +186,8 @@ function renderNav() {
     const { id } = group;
     const title = groupTitle(group, state.description);
     const count = counts.get(id);
-    const badge = count?.error ? `<span class="badge badge-error" aria-label="ошибок: ${count.error}">${count.error}</span>`
-      : count?.other ? `<span class="badge badge-advice" aria-label="рекомендаций: ${count.other}">!</span>` : "";
+    const badge = count?.error ? `<span class="badge badge-error" aria-label="${T.page.errorsBadge(count.error)}">${count.error}</span>`
+      : count?.other ? `<span class="badge badge-advice" aria-label="${T.page.adviceBadge(count.other)}">!</span>` : "";
     return `<button type="button" data-group="${id}"${id === view.group ? ' aria-current="page"' : ""}>${escapeHtml(title)}${badge}</button>`;
   }).join("");
 }
@@ -223,7 +223,7 @@ function fieldId(path) {
 // the hint and the messages of a field open from small buttons beside its label,
 // so the form stays short; the message button shows only while there is something to say
 function tipButtons(id) {
-  return `<button type="button" class="tip-toggle" aria-label="Пояснение" aria-expanded="false" aria-controls="${id}-hint">?</button><button type="button" class="tip-toggle tip-msg" aria-label="Сообщение" aria-expanded="false" aria-controls="${id}-msg" hidden>!</button>`;
+  return `<button type="button" class="tip-toggle" aria-label="${T.page.hintButton}" aria-expanded="false" aria-controls="${id}-hint">?</button><button type="button" class="tip-toggle tip-msg" aria-label="${T.page.messageButton}" aria-expanded="false" aria-controls="${id}-msg" hidden>!</button>`;
 }
 
 function tipBoxes(id, hint) {
@@ -234,16 +234,16 @@ function tipBoxes(id, hint) {
 function numberMarkup(field, description) {
   const id = fieldId(field.path);
   const limits = fieldSchema(schema, field, description);
-  const unit = field.unit ? ` ${field.unit}` : "";
+  const unit = field.unit ? ` ${fieldUnit(field)}` : "";
   const range = `${formatNumber(limits.minimum)}…${formatNumber(limits.maximum)}${unit}`;
   return `<div class="field" data-field="${field.path}">
     <div class="field-head"><label for="${id}"><span class="field-label">${escapeHtml(fieldLabel(field, description))}</span> <span class="field-symbol">${symbolHtml(field.symbol)}</span></label>${tipButtons(id)}</div>
     <div class="input-row">
       <input id="${id}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-path="${field.path}"
         value="${escapeHtml(inputText(getValue(description, field.path)))}" aria-describedby="${id}-hint ${id}-msg">
-      ${field.unit ? `<span class="unit">${field.unit}</span>` : ""}
+      ${field.unit ? `<span class="unit">${fieldUnit(field)}</span>` : ""}
     </div>
-    ${tipBoxes(id, `${escapeHtml(fieldHint(field, description))} <span class="range">Допустимо ${range}, по умолчанию ${formatNumber(limits.default)}${unit}.</span>`)}
+    ${tipBoxes(id, `${escapeHtml(fieldHint(field, description))} <span class="range">${T.page.range(range, `${formatNumber(limits.default)}${unit}`)}</span>`)}
   </div>`;
 }
 
@@ -262,7 +262,7 @@ function choiceMarkup(field, description) {
   const id = fieldId(field.path);
   return `<fieldset class="field field-choice" data-field="${field.path}" aria-describedby="${id}-hint ${id}-msg">
     <legend><span class="field-head">${escapeHtml(fieldLabel(field, description))}${tipButtons(id)}</span></legend>
-    <div class="segmented">${field.options.map((option) => `<label><input type="radio" name="${id}" value="${option.value}" data-path="${field.path}"${option.value === value ? " checked" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("")}</div>
+    <div class="segmented">${fieldOptions(field).map((option) => `<label><input type="radio" name="${id}" value="${option.value}" data-path="${field.path}"${option.value === value ? " checked" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("")}</div>
     ${tipBoxes(id, escapeHtml(fieldHint(field, description)))}
   </fieldset>`;
 }
@@ -271,39 +271,41 @@ function choiceMarkup(field, description) {
 function computedMarkup() {
   if (!model) return "";
   const { derived, anchors } = model;
-  const previous = result.normalized ? "" : ' <span class="tag">для прежних параметров</span>';
+  const previous = result.normalized ? "" : ` <span class="tag">${T.sizes.previous}</span>`;
+  const S = T.sizes;
+  const mm = T.units.mm;
   // without a web the rim reaches the hub, its inner diameter is the hub one
   const rimInner = model.normalized.web.type === "none" ? null : 2 * derived.rimInnerRadius;
   const rows = {
     rim: {
-      idlerPulley: [["Внутренний диаметр обода", rimInner]],
-      gear: [["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр вершин", 2 * derived.outsideRadius], ["Диаметр впадин", 2 * derived.rootRadius],
-        ["Основной диаметр", 2 * derived.baseRadius], [derived.lead === null ? "Шаг по делительной окружности" : "Шаг по делительной окружности в торце", derived.pitch],
-        ["Торцевой модуль", derived.lead === null ? null : derived.transverseModule], ["Ход винтовой линии зуба", derived.lead], ["Внутренний диаметр венца", rimInner]],
-      timingPulley: [["Наружный диаметр по вершинам", 2 * derived.outsideRadius], ["Делительный диаметр", 2 * derived.pitchRadius], ["Диаметр по дну канавок", 2 * derived.grooveRootRadius], ["Внутренний диаметр венца", rimInner]]
+      idlerPulley: [[S.idlerRimInner, rimInner]],
+      gear: [[S.pitchDiameter, 2 * derived.pitchRadius], [S.tipDiameter, 2 * derived.outsideRadius], [S.rootDiameter, 2 * derived.rootRadius],
+        [S.baseDiameter, 2 * derived.baseRadius], [derived.lead === null ? S.pitch : S.transversePitch, derived.pitch],
+        [S.transverseModule, derived.lead === null ? null : derived.transverseModule], [S.lead, derived.lead], [S.rimInner, rimInner]],
+      timingPulley: [[S.pulleyOutside, 2 * derived.outsideRadius], [S.pitchDiameter, 2 * derived.pitchRadius], [S.grooveRoot, 2 * derived.grooveRootRadius], [S.rimInner, rimInner]]
     }[model.normalized.kind],
-    flanges: [["Диаметр нижнего фланца", derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], ["Диаметр верхнего фланца", derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], ["Полная высота детали", derived.bounds.max[2] - derived.bounds.min[2]]],
-    web: model.normalized.web.type === "none" ? [] : [[model.normalized.web.type === "spokes" ? "Толщина спиц" : "Толщина полотна", derived.webThickness],
-      [`Промежуток между втулкой и ${derived.pitchRadius === null ? "ободом" : "венцом"}`, anchors.radii.rimInner - anchors.radii.hub],
-      ["Полотно по высоте, от", derived.webLowerZ], ["до", derived.webUpperZ]],
-    hub: [["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius], ["Втулка по высоте, от", derived.hubLowerZ], ["до", derived.hubUpperZ]],
+    flanges: [[S.lowerFlange, derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], [S.upperFlange, derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], [S.height, derived.bounds.max[2] - derived.bounds.min[2]]],
+    web: model.normalized.web.type === "none" ? [] : [[model.normalized.web.type === "spokes" ? S.spokeThickness : S.webThickness, derived.webThickness],
+      [S.hubToRim(derived.pitchRadius === null), anchors.radii.rimInner - anchors.radii.hub],
+      [S.webFrom, derived.webLowerZ], [S.upTo, derived.webUpperZ]],
+    hub: [[S.hubWall, derived.hubRadius - derived.boreOuterRadius], [S.hubFrom, derived.hubLowerZ], [S.upTo, derived.hubUpperZ]],
     bore: boreRows(model),
     generation: []
   }[view.group].filter(([, value]) => typeof value === "number");
   if (view.group === "generation") {
-    return `<div class="computed"><h3>Отрезков на окружность${previous}</h3><dl>${chordSummary(model).map(({ name, diameter, segments }) =>
-      `<div><dt>${escapeHtml(name)} ⌀${formatNumber(diameter)} мм</dt><dd>${segments}</dd></div>`).join("")}</dl></div>`;
+    return `<div class="computed"><h3>${S.segmentsTitle}${previous}</h3><dl>${chordSummary(model).map(({ name, diameter, segments }) =>
+      `<div><dt>${escapeHtml(S.circles[name])} ⌀${formatNumber(diameter)} ${mm}</dt><dd>${segments}</dd></div>`).join("")}</dl></div>`;
   }
   if (!rows.length) return "";
-  return `<div class="computed"><h3>Вычисленные размеры${previous}</h3><dl>${rows.map(([name, value]) =>
-    `<div><dt>${escapeHtml(name)}</dt><dd>${formatNumber(value)} мм</dd></div>`).join("")}</dl></div>`;
+  return `<div class="computed"><h3>${S.title}${previous}</h3><dl>${rows.map(([name, value]) =>
+    `<div><dt>${escapeHtml(name)}</dt><dd>${formatNumber(value)} ${mm}</dd></div>`).join("")}</dl></div>`;
 }
 
 function boreRows({ normalized: { bore }, derived }) {
   return [
-    bore.shape === "polygon" && [bore.sides % 2 ? "Диаметр вписанной окружности" : "Диаметр вписанной окружности, между гранями", bore.diameter * Math.cos(Math.PI / bore.sides)],
-    bore.shape === "keyed" && ["От стенки отверстия до дна паза, d + t", bore.diameter + bore.keyDepth],
-    ["Стенка втулки в самом тонком месте", derived.hubRadius - derived.boreOuterRadius]
+    bore.shape === "polygon" && [bore.sides % 2 ? T.sizes.inscribed : T.sizes.inscribedFlats, bore.diameter * Math.cos(Math.PI / bore.sides)],
+    bore.shape === "keyed" && [T.sizes.keyway, bore.diameter + bore.keyDepth],
+    [T.sizes.hubWall, derived.hubRadius - derived.boreOuterRadius]
   ].filter(Boolean);
 }
 
@@ -321,12 +323,12 @@ function presetCards() {
   const kinds = PRESET_KIND_ORDER.map((id) => KINDS.find((kind) => kind.id === id));
   const sections = kinds.map((kind) => `<h3 class="preset-kind">${escapeHtml(kind.title)}</h3>
     <p class="lead">${escapeHtml(kind.text)}</p>
-    <div class="presets">${card(`data-new="${kind.id}"`, "preset-new", defaultDescription(schema, kind.id), "Новый", "Все размеры по умолчанию.")}${
+    <div class="presets">${card(`data-new="${kind.id}"`, "preset-new", defaultDescription(schema, kind.id), T.page.newPart, T.page.newPartText)}${
       presets.map((preset, index) => preset.description.kind === kind.id
         ? card(`data-preset="${index}"`, "", preset.description, preset.title, preset.text) : "").join("")}</div>`).join("");
-  return `<p class="lead">Начните с готового варианта: он заменит текущие параметры, дальше их можно менять в любом разделе. Чтобы продолжить с текущими, откройте любой раздел.</p>
+  return `<p class="lead">${T.page.presetsLead}</p>
     <label class="toggle keep-shaft"><input type="checkbox" id="keep-shaft"${view.keepShaft ? " checked" : ""}>
-      <span>Оставить текущие втулку и отверстие — для детали на тот же вал</span></label>${sections}`;
+      <span>${T.page.keepShaft}</span></label>${sections}`;
 }
 
 /** Plan view without sizes, or nothing for a description that cannot be drawn. */
@@ -363,7 +365,7 @@ function renderMessages() {
     const box = node.querySelector(".field-msg");
     if (box) {
       box.innerHTML = own.map((item) => `<p class="msg msg-${diagnosticKind(item)}">${escapeHtml(diagnosticText(item, state.description))}</p>`).join("") +
-        owners.map((owner) => `<p class="msg msg-ref">Связано с сообщением у поля «${escapeHtml(fieldLabel(FIELD_BY_PATH.get(owner), state.description))}».</p>`).join("");
+        owners.map((owner) => `<p class="msg msg-ref">${escapeHtml(T.page.related(fieldLabel(FIELD_BY_PATH.get(owner), state.description)))}</p>`).join("");
       const button = node.querySelector(".tip-msg");
       button.hidden = !box.innerHTML;
       if (button.hidden) button.setAttribute("aria-expanded", "false");
@@ -383,8 +385,8 @@ function renderStatus(shown) {
       ? ` <button type="button" class="link" data-goto="${item.paths[0]}">${escapeHtml(groupTitle(group, state.description))} →</button>` : ""}</li>`;
   }).join("");
   const headline = errors.length
-    ? `<p class="status-line status-error">Деталь пока нельзя построить: ${errors.length === 1 ? "одна ошибка" : `ошибок — ${errors.length}`}.</p>`
-    : `<p class="status-line status-ok">Размеры согласованы, деталь можно строить.</p>`;
+    ? `<p class="status-line status-error">${T.page.blocked(errors.length)}</p>`
+    : `<p class="status-line status-ok">${T.page.consistent}</p>`;
   el.status.innerHTML = headline + (links ? `<ul class="status-list">${links}</ul>` : "");
 }
 
@@ -419,16 +421,16 @@ function renderDrawings() {
   const covered = (mine, other) => [...mine].every((path) => other.has(path));
   setLabelSpan(el.planFigure, covered(plan, section) ? CONTEXT_VIEW_SCALE : 1);
   setLabelSpan(el.sectionFigure, covered(section, plan) ? CONTEXT_VIEW_SCALE : 1);
-  el.planTag.textContent = view.group === "bore" ? "втулка крупно, в масштабе"
-    : model.plan.spokes?.schematic ? "спицы схематично: скругления не помещаются" : "в масштабе";
-  el.sectionTag.textContent = model.normalized.web.type === "spokes" ? "в масштабе, спицы — разрез по спице" : "в масштабе";
+  const words = T.drawings;
+  el.planTag.textContent = view.group === "bore" ? words.hubCloseUp : model.plan.spokes?.schematic ? words.schematicSpokes : words.toScale;
+  el.sectionTag.textContent = model.normalized.web.type === "spokes" ? words.spokeSection : words.toScale;
   // gear teeth get a larger view of their own sizes
   const teeth = view.group === "rim" && model.normalized.kind === "gear";
   el.toothFigure.hidden = el.helixFigure.hidden = !teeth;
   el.tooth.innerHTML = teeth ? renderTooth(model, ctx) : "";
   el.helix.innerHTML = teeth ? renderHelix(model, ctx) : "";
   if (teeth) {
-    el.toothTag.textContent = model.normalized.rim.helix === "none" ? "в масштабе" : "торцевое сечение, в масштабе";
+    el.toothTag.textContent = model.normalized.rim.helix === "none" ? words.toScale : words.transverseSection;
     for (const [figure, drawing] of [[el.toothFigure, el.tooth], [el.helixFigure, el.helix]]) {
       cropToContent(drawing.querySelector("svg"));
       setLabelSpan(figure, 1);
@@ -503,19 +505,20 @@ function renderPreview() {
   const status = previewState();
   const shown = Boolean(viewer?.source);
   const answer = build.reply;
-  const previous = shown ? " Показана модель для прежних параметров." : "";
-  const cause = answer?.message === "timeout" ? `нет ответа за ${BUILD_TIMEOUT_MS / 1000} с` : answer?.message;
+  const words = T.preview;
+  const previous = shown ? words.previousShown : "";
+  const cause = answer?.message === "timeout" ? words.timeout(BUILD_TIMEOUT_MS / 1000) : answer?.message;
   const overlay = {
     fresh: "",
-    building: shown ? "Строится модель для новых параметров…" : "Строится модель…",
-    invalid: shown ? "Модель для прежних параметров: в текущих есть ошибки, они показаны у полей." : "Модели нет: исправьте ошибки в размерах.",
-    failed: `Ядро не смогло построить сетку, причина — в сообщениях у полей.${previous}`,
-    crashed: `Сбой фонового вычисления (${cause}).${previous} Если повтор не помогает, сохраните JSON: по нему сбой можно воспроизвести.`
+    building: words.building(shown),
+    invalid: words.invalid(shown),
+    failed: words.failed(previous),
+    crashed: words.crashed(cause, previous)
   }[status];
   el.viewport.dataset.state = status;
-  el.previewState.textContent = PREVIEW_TAGS[status];
-  el.canvas.setAttribute("aria-label", `3D-модель шкива, ${PREVIEW_TAGS[status]}`);
-  el.overlay.textContent = viewer ? overlay : `3D-просмотр недоступен: браузер не дал WebGL. ${status === "fresh" ? "Модель построена, STL можно скачать." : overlay}`;
+  el.previewState.textContent = words.tags[status];
+  el.canvas.setAttribute("aria-label", words.canvas(words.tags[status]));
+  el.overlay.textContent = viewer ? overlay : words.noWebgl(status === "fresh", overlay);
   el.overlay.hidden = viewer ? !overlay : false;
   el.retry.hidden = status !== "crashed";
   viewer?.setStale(status !== "fresh" && status !== "building");
@@ -524,24 +527,18 @@ function renderPreview() {
     const { bounds } = answer.mesh;
     const size = [0, 1, 2].map((axis) => formatNumber(bounds.max[axis] - bounds.min[axis])).join(" × ");
     const triangles = answer.verification.triangleCount;
-    el.previewInfo.textContent = `${size} мм · ${triangles.toLocaleString("ru-RU")} ${plural(triangles, "треугольник", "треугольника", "треугольников")} · построено за ${Math.round(answer.elapsed)} мс`;
+    el.previewInfo.textContent = words.info(size, triangles, formatCount(triangles), Math.round(answer.elapsed));
   } else {
     el.previewInfo.textContent = "";
   }
   const blocker = stlBlocker(status);
   el.stl.setAttribute("aria-disabled", String(Boolean(blocker)));
-  el.stl.title = blocker || "Сетка по текущим параметрам, деталь стоит на столе нижней гранью";
+  el.stl.title = blocker || words.stlReady;
 }
 
 /** Why STL cannot be downloaded right now; empty when it can. */
 function stlBlocker(status = previewState()) {
-  return {
-    fresh: "",
-    building: "Модель для текущих параметров ещё строится.",
-    invalid: "В размерах есть ошибки. Прежняя модель не скачивается, чтобы не спутать её с текущей.",
-    failed: "Модель по текущим параметрам не построилась, причина — в сообщениях у полей.",
-    crashed: "Фоновое вычисление завершилось сбоем. Нажмите «Повторить построение»."
-  }[status];
+  return status === "fresh" ? "" : T.preview.stlBlocked[status];
 }
 
 // ----------------------------------------------------------------- events
@@ -633,8 +630,7 @@ el.form.addEventListener("click", (event) => {
   const loaded = loadDescription(state, description);
   update(view.keepShaft ? keepShaft(loaded, state) : loaded);
   openGroup("rim");
-  const shaft = view.keepShaft ? ", втулка и отверстие прежние" : "";
-  showNotice(created ? `Новая деталь «${kindOf(description).title}»: размеры по умолчанию${shaft}.` : `Загружен вариант «${chosen.title}»${shaft}.`);
+  showNotice(created ? T.notices.newPart(kindOf(description).title, view.keepShaft) : T.notices.presetLoaded(chosen.title, view.keepShaft));
 });
 
 // a tip shows while its button is hovered or focused, a click keeps it open until a click elsewhere
@@ -689,24 +685,24 @@ function pickFromDrawing(target) {
 
 $("#save").addEventListener("click", () => {
   if (!result.normalized) {
-    showNotice("Сначала исправьте поля с ошибкой формата: сохраняется только описание, которое можно прочитать обратно.", "error");
+    showNotice(T.notices.fixFormatFirst, "error");
     return;
   }
   const blob = new Blob([`${JSON.stringify({ generator: GENERATOR, ...result.normalized }, null, 2)}\n`], { type: "application/json" });
   download(blob, `${partFileName(result.normalized)}.json`);
-  showNotice(result.ok ? "Описание сохранено." : "Описание сохранено, но в нём есть ошибки размеров.");
+  showNotice(T.notices.saved(result.ok));
 });
 
 // only the mesh built from exactly the current parameters is exported
 el.stl.addEventListener("click", () => {
   const blocker = stlBlocker();
   if (blocker) {
-    showNotice(`STL не скачан. ${blocker}`, "error");
+    showNotice(T.notices.stlNotDownloaded(blocker), "error");
     return;
   }
   const exported = exportBinaryStl(build.reply.mesh, { placement: "onBed" });
   download(new Blob([exported.data], { type: "model/stl" }), `${partFileName(validation.normalized)}.stl`);
-  showNotice("STL скачан. Деталь стоит на столе нижней гранью, координаты в миллиметрах.");
+  showNotice(T.notices.stlDownloaded);
 });
 
 $("#view-reset").addEventListener("click", () => viewer?.resetView());
@@ -738,29 +734,34 @@ el.file.addEventListener("change", async () => {
   el.file.value = "";
   if (!file) return;
   if (file.size > MAX_FILE_BYTES) {
-    showNotice(`«${file.name}» слишком большой для описания шкива (${Math.round(file.size / 1024)} КБ).`, "error");
+    showNotice(T.notices.fileTooBig(file.name, Math.round(file.size / 1024)), "error");
     return;
   }
   let parsed;
   try {
     parsed = JSON.parse(await file.text());
   } catch {
-    showNotice(`«${file.name}» — не JSON.`, "error");
+    showNotice(T.notices.notJson(file.name), "error");
     return;
   }
   const checked = validateDescription(parsed);
   if (!checked.normalized) {
     const first = checked.diagnostics.find((item) => item.severity === "error");
-    showNotice(`«${file.name}» не подходит: ${first.paths[0] || "корень"} — ${diagnosticText(first)}`, "error");
+    showNotice(T.notices.unfit(file.name, first.paths[0], diagnosticText(first)), "error");
     return;
   }
   update(loadDescription(state, checked.normalized));
   openGroup("rim");
-  showNotice(`Открыт «${file.name}».`);
+  showNotice(T.notices.opened(file.name));
+});
+
+// the other language opens on the same section and field
+$("#lang").addEventListener("click", (event) => {
+  event.currentTarget.href = `${event.currentTarget.getAttribute("href").split("#")[0]}${location.hash}`;
 });
 
 $("#reset").addEventListener("click", () => {
-  if (!confirm("Вернуть все параметры к значениям по умолчанию?")) return;
+  if (!confirm(T.notices.confirmReset)) return;
   update(createState(schema, state.description.kind));
   openGroup("rim");
 });

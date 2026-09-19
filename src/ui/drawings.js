@@ -13,8 +13,9 @@
 import { circleSegmentCount } from "../core/contours.js";
 import { buildGearContour, gearGeometry } from "../core/involute.js";
 import { helixTurn } from "../core/rims.js";
-import { FIELD_BY_PATH, fieldLabel } from "./fields.js";
+import { FIELD_BY_PATH, fieldLabel, fieldUnit } from "./fields.js";
 import { escapeHtml, formatNumber, splitSymbol } from "./format.js";
+import { T } from "./locale.js";
 
 const f = (value) => String(Math.round(value * 1000) / 1000);
 const P = ([x, y]) => `${f(x)},${f(-y)}`;
@@ -73,7 +74,7 @@ function dimClass(ctx, path) {
 function wrap(ctx, path, value, inner) {
   if (!ctx.visible.has(path)) return "";
   const field = FIELD_BY_PATH.get(path);
-  const name = `${fieldLabel(field, ctx.description)}: ${typeof value === "number" ? formatNumber(value) : value}${field.unit ? ` ${field.unit}` : ""}`;
+  const name = `${fieldLabel(field, ctx.description)}: ${typeof value === "number" ? formatNumber(value) : value}${field.unit ? ` ${fieldUnit(field)}` : ""}`;
   return `<g class="${dimClass(ctx, path)}" data-path="${path}" tabindex="0" role="button" aria-label="${escapeHtml(name)}">${inner}</g>`;
 }
 
@@ -191,7 +192,7 @@ export function renderPlan(model, ctx) {
   if (plan.spokes && web.type === "spokes") out.push(...spokeDimensions(ctx, plan, web, u, outer));
   if (detail) out.push(...boreDimensions(ctx, model, u, outer));
   const defs = detail ? `<clipPath id="plan-detail"><path d="${circlePath(detail)}"/></clipPath>` : "";
-  return svgRoot([-extent, -extent, 2 * extent, 2 * extent], u, out.join(""), "Поперечный разрез по полотну", defs);
+  return svgRoot([-extent, -extent, 2 * extent, 2 * extent], u, out.join(""), T.drawings.plan, defs);
 }
 
 /** Bore sizes on the hub detail; the flat and the keyway face +X, so d is measured vertically. */
@@ -330,7 +331,7 @@ export function renderTooth(model, ctx) {
     u, a: pitchA, b: pitchB, value: m,
     ext: [0, step].map((angle) => [polar(gear.fullTip + 0.3 * u, angle), polar(level + 0.4 * u, angle)]),
     label: add(pitchMiddle, [0, 1.1 * u]), anchor: "middle",
-    extra: `<text class="note" x="${f(pitchMiddle[0])}" y="${f(-(pitchMiddle[1] + 2.2 * u))}" text-anchor="middle">${inclined ? "шаг в торце πm/cos β" : "шаг πm"} = ${escapeHtml(formatNumber(pitch))}</text>`
+    extra: `<text class="note" x="${f(pitchMiddle[0])}" y="${f(-(pitchMiddle[1] + 2.2 * u))}" text-anchor="middle">${T.drawings.pitch(inclined)} = ${escapeHtml(formatNumber(pitch))}</text>`
   }));
 
   // α: at the pitch point of the left flank, between the tangent to the pitch circle
@@ -349,7 +350,7 @@ export function renderTooth(model, ctx) {
     `<path class="dim-ext" d="M${P(arc[4])}L${P(angleLabel)}"/>` +
     labelMarkup("/rim/pressureAngle", rim.pressureAngle, add(angleLabel, [-0.3 * u, 0]), "end") +
     // the section angle under the normal one the field holds
-    (inclined ? `<text class="note" x="${f(angleLabel[0] - 0.3 * u)}" y="${f(-(angleLabel[1] - 1.2 * u))}" text-anchor="end">в торце ${escapeHtml(formatNumber(gear.transversePressureAngle * 180 / Math.PI))}</text>` : "")));
+    (inclined ? `<text class="note" x="${f(angleLabel[0] - 0.3 * u)}" y="${f(-(angleLabel[1] - 1.2 * u))}" text-anchor="end">${T.drawings.transverse} ${escapeHtml(formatNumber(gear.transversePressureAngle * 180 / Math.PI))}</text>` : "")));
 
   // x: the rack datum moved from the pitch circle, in the space right of the tooth;
   // j: the thinning at the pitch circle on the right flank, against the dashed tooth
@@ -371,7 +372,7 @@ export function renderTooth(model, ctx) {
 
   const defs = `<clipPath id="tooth-detail"><path d="${frame}"/></clipPath>`;
   const box = [-halfWidth - 7 * u, -(level + 3.2 * u), 2 * halfWidth + 14 * u, level + 3.2 * u - bottom + u];
-  return svgRoot(box, u, out.join(""), "Зубья крупно", defs);
+  return svgRoot(box, u, out.join(""), T.drawings.tooth, defs);
 }
 
 // -------------------------------------------------------------- helix view
@@ -427,7 +428,7 @@ export function renderHelix(model, ctx) {
     labelMarkup("/rim/helixAngle", rim.helixAngle, add(labelAt, [0.3 * u, 0]), "start")));
 
   const box = [-outside - 7 * u, -(halfWidth + 3 * u), 2 * outside + 14 * u, rim.width + 6 * u];
-  return svgRoot(box, u, out.join(""), "Зубья сбоку");
+  return svgRoot(box, u, out.join(""), T.drawings.helix);
 }
 
 // ------------------------------------------------------------- section view
@@ -567,7 +568,7 @@ export function renderSection(model, ctx) {
 
   const width = 2 * outer + 6.5 * u + 7 * u;
   const box = [-outer - 7 * u, -(top + 4.2 * u), width, top - bottom + 7.6 * u];
-  return svgRoot(box, u, out.join(""), "Осевой разрез", hatchPattern("section-hatch", u));
+  return svgRoot(box, u, out.join(""), T.drawings.section, hatchPattern("section-hatch", u));
 }
 
 // --------------------------------------------------------------- chord view
@@ -592,22 +593,22 @@ export function renderChord(model, ctx) {
       u, a: chordMiddle, b: sagittaTop, value: epsilon,
       label: [0.6 * u, (chordMiddle[1] + sagittaTop[1]) / 2], anchor: "start"
     }),
-    `<text class="note" x="${f(0)}" y="${f(-(chordMiddle[1] - 1.1))}" text-anchor="middle">хорда сетки</text>`,
-    `<text class="note" x="${f(arcNote[0])}" y="${f(-arcNote[1])}" text-anchor="start">точная окружность</text>`
+    `<text class="note" x="${f(0)}" y="${f(-(chordMiddle[1] - 1.1))}" text-anchor="middle">${T.drawings.chordLine}</text>`,
+    `<text class="note" x="${f(arcNote[0])}" y="${f(-arcNote[1])}" text-anchor="start">${T.drawings.exactCircle}</text>`
   ];
-  return svgRoot([-12, -(radius + 1.4), 24, 7], u, out.join(""), "Схема допуска хорды");
+  return svgRoot([-12, -(radius + 1.4), 24, 7], u, out.join(""), T.drawings.chord);
 }
 
-/** Segment counts the mesh will use for characteristic circles at the current tolerance. */
+/** Segment counts the mesh will use for characteristic circles at the current tolerance; `name` is a key of T.sizes.circles. */
 export function chordSummary(model) {
   const epsilon = model.normalized.generation.maxChordError;
   const r = model.anchors.radii;
   const flange = Math.max(model.derived.lowerFlangeOuterRadius ?? 0, model.derived.upperFlangeOuterRadius ?? 0);
   return [
-    model.normalized.bore.shape === "polygon" ? null : ["отверстие", r.bore],
-    ["втулка", r.hub],
-    model.normalized.kind === "idlerPulley" ? ["обод", r.outside] : null,
-    flange > 0 ? ["фланец", flange] : null
+    model.normalized.bore.shape === "polygon" ? null : ["bore", r.bore],
+    ["hub", r.hub],
+    model.normalized.kind === "idlerPulley" ? ["rim", r.outside] : null,
+    flange > 0 ? ["flange", flange] : null
   ].filter(Boolean).filter(([, radius]) => radius > 0)
     .map(([name, radius]) => ({ name, diameter: 2 * radius, segments: circleSegmentCount(radius, epsilon) }));
 }

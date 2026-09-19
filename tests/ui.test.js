@@ -4,7 +4,9 @@ import test from "node:test";
 import { buildPlanView, validateDescription } from "../src/core/generate.js";
 import { chordSummary, renderChord, renderHelix, renderPlan, renderSection, renderTooth } from "../src/ui/drawings.js";
 import { FIELD_BY_PATH, FIELDS, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle } from "../src/ui/fields.js";
-import { formatNumber, inputText, plural, splitSymbol } from "../src/ui/format.js";
+import { formatCount, formatNumber, inputText, splitSymbol } from "../src/ui/format.js";
+import { LOCALES, setLanguage } from "../src/ui/locale.js";
+import { plural } from "../src/ui/locale-ru.js";
 import { diagnosticKind, diagnosticText } from "../src/ui/messages.js";
 import { PRESETS } from "../src/ui/presets.js";
 import { createState, getValue, keepShaft, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setHelix, setValue, setWebType } from "../src/ui/state.js";
@@ -13,6 +15,9 @@ const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.
 const schema = await readJson("../schemas/pulley-v5.schema.json");
 const exampleNames = async (kind) => (await readdir(new URL(`../examples/${kind}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();
 const numeric = (field) => !field.kind;
+
+// the text checks below are written against the Russian dictionary; the English one mirrors its keys
+setLanguage("ru");
 
 function modelOf(description) {
   const result = validateDescription(description);
@@ -39,7 +44,11 @@ test("every field is described completely and its limits come from the schema", 
     assert.ok(groups.has(field.group), field.path);
     assert.ok(!paths.has(field.path), `duplicate ${field.path}`);
     paths.add(field.path);
-    assert.ok(field.label && field.hint, field.path);
+    for (const [lang, words] of Object.entries(LOCALES)) {
+      const text = words.fields[field.path];
+      assert.ok(text?.label && text.hint, `${lang} ${field.path}`);
+      for (const value of field.options ?? []) assert.ok(text.options?.[value], `${lang} ${field.path} ${value}`);
+    }
     if (!numeric(field)) continue;
     assert.ok(field.symbol, `${field.path} has no drawing symbol`);
     // limits may depend on the kind: check them for every kind that has the field
@@ -98,7 +107,7 @@ test("the focused dimension is marked and the drawings are self-contained", asyn
   const model = modelOf(await readJson("../examples/valid/trial-60t.json"));
   const plan = renderPlan(model, contextFor(model, "web", "/web/filletRadius"));
   assert.match(plan, /<g class="dim is-focus" data-path="\/web\/filletRadius"/);
-  assert.match(plan, /role="button" aria-label="Радиус скруглений: 1,5 мм"/);
+  assert.match(plan, /role="button" aria-label="Радиус скруглений: 1.5 мм"/);
   const section = renderSection(model, contextFor(model, "web"));
   // one hatch pattern with a page-unique id, referenced by the section only
   assert.equal([...section.matchAll(/<pattern id="section-hatch"/g)].length, 1);
@@ -139,11 +148,11 @@ test("a schematic spoke plan still draws, without fillet radii", async () => {
 test("chord summary counts segments for the characteristic circles", async () => {
   const model = modelOf(await readJson("../examples/valid/trial-60t.json"));
   const rows = chordSummary(model);
-  assert.deepEqual(rows.map(({ name }) => name), ["отверстие", "втулка", "фланец"]);
+  assert.deepEqual(rows.map(({ name }) => name), ["bore", "hub", "flange"]);
   assert.ok(rows.every(({ segments }) => Number.isInteger(segments) && segments >= 12));
   assert.ok(rows[0].segments < rows[2].segments, "a larger circle needs more segments");
   const hex = modelOf(await readJson("../examples/valid/hex-bore.json"));
-  assert.ok(!chordSummary(hex).some(({ name }) => name === "отверстие"), "a polygonal bore has no arcs");
+  assert.ok(!chordSummary(hex).some(({ name }) => name === "bore"), "a polygonal bore has no arcs");
 });
 
 test("defaults validate and the form state keeps hidden values", () => {
@@ -277,18 +286,20 @@ test("presets point at valid examples", async () => {
   }
 });
 
-test("numbers read and written the Russian way", () => {
+test("numbers are written with a dot in every language", () => {
   assert.equal(parseNumber("1,5"), 1.5);
   assert.equal(parseNumber(" −2 "), -2);
   assert.equal(parseNumber("-0.25"), -0.25);
   assert.ok(Number.isNaN(parseNumber("")));
   assert.ok(Number.isNaN(parseNumber("6x")));
-  assert.equal(formatNumber(1.5), "1,5");
+  assert.equal(formatNumber(1.5), "1.5");
   assert.equal(formatNumber(-2), "−2");
   assert.equal(formatNumber(-0.004), "0");
-  assert.equal(formatNumber(25.4648), "25,46");
+  assert.equal(formatNumber(25.4648), "25.46");
   assert.equal(formatNumber(NaN), "—");
-  assert.equal(inputText(0.05), "0,05");
+  assert.equal(inputText(0.05), "0.05");
+  assert.equal(formatCount(9324), "9 324");
+  assert.equal(formatCount(512), "512");
   assert.equal(inputText("6x"), "6x");
   assert.deepEqual(splitSymbol("T_f−"), { base: "T", sub: "f−" });
   assert.deepEqual(splitSymbol("ε"), { base: "ε", sub: "" });
@@ -329,5 +340,38 @@ test("fillet advice does not repeat a missing hub-to-rim span", async () => {
   input.web.filletRadius = 2;
   const fillet = validateDescription(input).diagnostics.find(({ code }) => code === "E_SPOKE_FILLET");
   assert.deepEqual(fillet.details, { maxByWidth: 1.5 });
-  assert.equal(diagnosticText(fillet), "Радиус скругления — не больше половины ширины спицы, 1,5 мм.");
+  assert.equal(diagnosticText(fillet), "Радиус скругления — не больше половины ширины спицы, 1.5 мм.");
+});
+
+// the same keys all the way down; a function stands for a text, whatever its arguments
+function shape(value) {
+  if (typeof value === "function") return "text";
+  if (typeof value === "string") return "text";
+  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, shape(value[key])]));
+  return typeof value;
+}
+
+test("the English and the Russian dictionaries have the same texts", async () => {
+  assert.deepEqual(shape(LOCALES.en), shape(LOCALES.ru));
+  const core = new URL("../src/core/", import.meta.url);
+  const sources = await Promise.all((await readdir(core)).map((name) => readFile(new URL(name, core), "utf8")));
+  for (const code of new Set(sources.join("\n").match(/"[EW]_[A-Z0-9_]+"/g).map((code) => code.slice(1, -1)))) {
+    assert.equal(typeof LOCALES.en.diagnostics[code], "function", code);
+  }
+  assert.deepEqual(Object.keys(LOCALES.en.presets), PRESETS.map(({ file }) => file));
+  assert.deepEqual(Object.keys(LOCALES.en.kinds).sort(), KINDS.map(({ id }) => id).sort());
+  try {
+    setLanguage("en");
+    assert.equal(fieldLabel(FIELD_BY_PATH.get("/rim/module"), createState(schema, "gear").description), "Module");
+    assert.ok(PRESETS.every(({ title, text }) => !/[А-Яа-яЁё]/.test(title + text)), "English presets have no Cyrillic");
+  } finally {
+    setLanguage("ru");
+  }
+});
+
+test("both pages have the same elements", async () => {
+  const ids = async (name) => [...(await readFile(new URL(`../src/ui/${name}`, import.meta.url), "utf8")).matchAll(/ id="([^"]+)"/g)].map(([, id]) => id);
+  assert.deepEqual(await ids("index.html"), await ids("index_ru.html"));
+  const en = await readFile(new URL("../src/ui/index.html", import.meta.url), "utf8");
+  assert.ok(!/[А-Яа-яЁё]/.test(en.replace(/title="Русская версия"/, "")), "the English page has no Russian besides the switch");
 });

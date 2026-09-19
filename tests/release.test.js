@@ -36,17 +36,25 @@ test("the optional generator field is accepted, checked and dropped on normaliza
   assert.deepEqual(wrong.diagnostics.map((item) => item.paths[0]), ["/generator"]);
 });
 
-test("the built site has the page at its root and every module import resolves", async () => {
+test("the built site has both pages at its root and every module import resolves", async () => {
   const out = await mkdtemp(join(tmpdir(), "gears-site-"));
   try {
     await promisify(execFile)(process.execPath, [join(root, "tools/build-site.js"), out]);
-    const page = await readFile(join(out, "index.html"), "utf8");
-    for (const [, url] of page.matchAll(/(?:href|src)="([^"]+)"/g)) {
-      if (/^[a-z]+:/.test(url)) continue;
-      await stat(join(out, url)); // throws when the link is broken
+    const canonical = { "index.html": "", "index_ru.html": "index_ru.html" };
+    for (const [name, address] of Object.entries(canonical)) {
+      const page = await readFile(join(out, name), "utf8");
+      for (const [, url] of page.matchAll(/(?:href|src)="([^"]+)"/g)) {
+        if (/^[a-z]+:/.test(url)) continue;
+        await stat(join(out, url)).catch(() => assert.fail(`${name}: ${url} is missing`));
+      }
+      assert.ok(page.includes(`<link rel="canonical" href="https://apus-software.com/gears/${address}">`), name);
+      // the link preview points at the same address and at a picture the site has
+      assert.ok(page.includes(`<meta property="og:url" content="https://apus-software.com/gears/${address}">`), name);
+      const [, image] = page.match(/<meta property="og:image" content="https:\/\/apus-software\.com\/gears\/([^"]+)">/) ?? [];
+      assert.ok(image, `${name}: no og:image`);
+      await stat(join(out, image)).catch(() => assert.fail(`${name}: ${image} is missing`));
+      await assert.rejects(stat(join(out, "src/ui", name)));
     }
-    assert.match(page, /<link rel="canonical" href="https:\/\/apus-software\.com\/gears\/">/);
-    await assert.rejects(stat(join(out, "src/ui/index.html")));
     await assert.rejects(stat(join(out, "tests")));
 
     const modules = await listFiles(join(out, "src"), ".js");

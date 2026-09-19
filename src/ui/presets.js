@@ -1,23 +1,27 @@
 // Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
-// Ready-made variants: files from examples/valid with a title for people.
-// The variants page groups them by the kind written in the file. All but one lie flat
-// on their lower face, ready to print.
+// Ready-made variants: files from examples/valid; titles and texts for people are in
+// the locale files. The variants page groups them by the kind written in the file.
+// All but one lie flat on their lower face, ready to print.
+import { T } from "./locale.js";
+
+const preset = (file) => ({ file, get title() { return T.presets[file].title; }, get text() { return T.presets[file].text; } });
+
 export const PRESETS = [
-  { file: "trial-20t.json", title: "20 зубьев, сплошной", text: "Под ремень 6 мм: два фланца, отверстие 5 мм." },
-  { file: "trial-60t.json", title: "60 зубьев, спицы", text: "Под ремень 6 мм: шесть спиц заподлицо с нижним фланцем, два фланца, отверстие 5 мм." },
-  { file: "motor-d-flat.json", title: "30 зубьев, вал с лыской", text: "Под вал шагового двигателя 5 мм с лыской: отверстие 5,2 мм, размер по лыске 4,7 мм, втулка выступает вверх на 4 мм." },
-  { file: "solid-basic.json", title: "Простой сплошной", text: "24 зуба, без фланцев и выступов втулки." },
-  { file: "asymmetric.json", title: "Несимметричный", text: "Тонкое полотно у нижнего торца, фланец только сверху, втулка выступает над ним." },
-  { file: "spokes-flanged.json", title: "Спицы, разные фланцы", text: "60 зубьев, шесть спиц посередине, фланцы разной толщины, втулка выступает в обе стороны: низ не плоский." },
-  { file: "idler-shaft.json", title: "На вал 5 мм", text: "Диаметр 16 мм под ремень 6 мм, два фланца, отверстие 5,2 мм." },
-  { file: "idler-bearing.json", title: "Под подшипник 625", text: "Диаметр 28 мм, отверстие 16 мм под наружное кольцо подшипника 625 (5×16×5), два фланца." },
-  { file: "idler-spokes.json", title: "Большой, спицы", text: "Диаметр 40 мм под ремень 9 мм, пять спиц заподлицо с нижним фланцем, втулка выступает вверх." },
-  { file: "gear-keyed-20t.json", title: "20 зубьев, шпонка", text: "Модуль 2, диаметр 44 мм, ширина 10 мм, отверстие 8 мм со шпоночным пазом 3 мм." },
-  { file: "gear-pinion-12t.json", title: "12 зубьев без полотна", text: "Модуль 1 со смещением 0,3: зубья прямо от втулки, вал 5 мм с лыской." },
-  { file: "gear-motor-12t.json", title: "12 зубьев на мотор", text: "Модуль 1,5 со смещением 0,3 против подрезания, вал 5 мм с лыской, втулка выступает вверх на 5 мм." },
-  { file: "gear-spokes-60t.json", title: "60 зубьев, спицы", text: "Модуль 1,5, диаметр 93 мм, шесть спиц у нижнего торца, втулка выступает вверх." },
-  { file: "gear-helical-30t.json", title: "30 зубьев, косые правые", text: "Модуль 1,5, наклон +20°, отверстие 8 мм. Ответная шестерня — с левыми зубьями, −20°." },
-  { file: "gear-helical-15t.json", title: "15 зубьев, косые левые", text: "Пара к 30 зубьям с правыми: модуль 1,5, наклон −20°, вал 5 мм с лыской." },
-  { file: "gear-herringbone-32t.json", title: "Шеврон, 32 зуба", text: "Модуль 1,5, наклон +30°, ширина 12 мм, отверстие 8 мм. Ответная шестерня — с наклоном −30°." },
-  { file: "gear-herringbone-12t.json", title: "Шеврон, 12 зубьев без полотна", text: "Пара к 32 зубьям: модуль 1,5, наклон −30°, зубья прямо от втулки, вал 5 мм с лыской." }
+  preset("trial-20t.json"),
+  preset("trial-60t.json"),
+  preset("motor-d-flat.json"),
+  preset("solid-basic.json"),
+  preset("asymmetric.json"),
+  preset("spokes-flanged.json"),
+  preset("idler-shaft.json"),
+  preset("idler-bearing.json"),
+  preset("idler-spokes.json"),
+  preset("gear-keyed-20t.json"),
+  preset("gear-pinion-12t.json"),
+  preset("gear-motor-12t.json"),
+  preset("gear-spokes-60t.json"),
+  preset("gear-helical-30t.json"),
+  preset("gear-helical-15t.json"),
+  preset("gear-herringbone-32t.json"),
+  preset("gear-herringbone-12t.json")
 ];

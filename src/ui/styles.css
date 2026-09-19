@@ -9,6 +9,7 @@
   --accent-soft: #dbe7fd;
   --on-accent: #ffffff;
   --error: #c0322b;
+  --lang: #9b1c1c;
   --error-soft: #fbe3e1;
   --advice: #9a6700;
   --advice-soft: #fff4d6;
@@ -41,6 +42,7 @@
     --accent-soft: #1d2d4a;
     --on-accent: #0d1117;
     --error: #ff7b72;
+    --lang: #ff8f87;
     --error-soft: #3a1d1d;
     --advice: #e3b341;
     --advice-soft: #3a2f12;
@@ -117,15 +119,17 @@ button {
   margin-bottom: 6px;
 }
 
-.actions button {
+/* the language switch is a link to the other page, drawn as one more button */
+.actions :is(button, .lang) {
   padding: 5px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
 }
 
-.actions button:hover { border-color: var(--accent); }
+.actions :is(button, .lang):hover { border-color: var(--accent); }
 .actions .quiet { color: var(--muted); }
+.actions .lang { color: var(--lang); font-weight: 700; text-decoration: none; line-height: normal; }
 
 .actions .primary {
   background: var(--accent);

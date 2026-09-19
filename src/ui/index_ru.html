@@ -1,0 +1,107 @@
+<!doctype html>
+<!-- Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Генератор шестерён и шкивов</title>
+  <meta name="description" content="Генератор шкивов GT2, гладких шкивов и шестерён с прямыми, косыми и шевронными зубьями для 3D-печати: параметры с чертежами, 3D-просмотр и STL прямо в браузере.">
+  <meta name="author" content="Иван Поляков">
+  <link rel="canonical" href="https://apus-software.com/gears/index_ru.html">
+  <link rel="alternate" hreflang="en" href="https://apus-software.com/gears/">
+  <link rel="alternate" hreflang="ru" href="https://apus-software.com/gears/index_ru.html">
+  <link rel="alternate" hreflang="x-default" href="https://apus-software.com/gears/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Gears">
+  <meta property="og:title" content="Генератор шестерён и шкивов">
+  <meta property="og:description" content="Модели шестерён, шкивов и других деталей передач для 3D-печати: параметры с чертежами, 3D-просмотр и STL прямо в браузере.">
+  <meta property="og:url" content="https://apus-software.com/gears/index_ru.html">
+  <meta property="og:image" content="https://apus-software.com/gears/src/ui/og-ru.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Чертежи пары шестерён, шкива GT2 и гладкого шкива">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:locale:alternate" content="en_GB">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <!-- one row: the section tabs on the left, the file actions on the right -->
+  <header class="top">
+    <h1 id="part-title" class="visually-hidden">Шкив GT2</h1>
+    <nav id="groups" class="groups" aria-label="Разделы параметров"></nav>
+    <div class="actions">
+      <span class="badge-exp" id="profile-badge" title="Экспериментальный профиль зубьев: шаг и наружный диаметр сверены с каталогом, форма канавки подтверждается только пробной печатью">эксп. профиль</span>
+      <button type="button" id="open" title="Открыть описание детали из JSON-файла">Открыть</button>
+      <button type="button" id="save" title="Сохранить описание детали в JSON-файл">Сохранить</button>
+      <button type="button" id="download-stl" class="primary" aria-disabled="true" aria-describedby="preview-state">Скачать STL</button>
+      <button type="button" id="reset" class="quiet">Сбросить</button>
+      <input type="file" id="file-input" accept=".json,application/json" hidden>
+      <a class="lang" id="lang" href="./" hreflang="en" lang="en" title="English version">EN</a>
+    </div>
+  </header>
+  <p id="boot" class="notice">Загрузка… Если страница так и не заработала, её открыли без локального сервера: браузеры не загружают модули с file://. Запустите <code>npm run ui</code> и откройте http://127.0.0.1:8517/.</p>
+  <p id="notice" class="notice" role="status" hidden></p>
+  <main class="layout">
+    <div class="side">
+      <section class="form-panel" aria-labelledby="group-title">
+        <h2 id="group-title"></h2>
+        <div id="form"></div>
+      </section>
+      <section class="sizes" id="sizes" aria-label="Вычисленные размеры" aria-live="polite" hidden></section>
+      <section class="preview" aria-labelledby="preview-title">
+        <div class="preview-head">
+          <h2 id="preview-title">3D-модель</h2>
+          <button type="button" class="tip-toggle" aria-label="Как управлять видом" aria-expanded="false" aria-controls="viewer-help">?</button>
+          <p id="viewer-help" class="tip" role="tooltip">Перетаскивание — поворот, с Shift или правой кнопкой — сдвиг, колесо — масштаб, двойной щелчок — исходный вид. С клавиатуры: стрелки, Shift+стрелки, + и −, 0. Грани, видимые с изнанки, окрашены красным — на исправной сетке их не видно.</p>
+          <span class="tag" id="preview-state">строится…</span>
+        </div>
+        <div class="viewport" id="viewport" data-state="building">
+          <canvas id="viewer" tabindex="0" aria-label="3D-модель детали" aria-describedby="viewer-help"></canvas>
+          <p id="preview-overlay" class="preview-overlay" aria-live="polite" hidden></p>
+        </div>
+        <p id="preview-info" class="preview-info"></p>
+        <div class="preview-actions">
+          <button type="button" id="view-reset">Исходный вид</button>
+          <button type="button" id="retry" hidden>Повторить построение</button>
+        </div>
+      </section>
+    </div>
+    <section class="drawings" id="drawings" aria-label="Чертежи">
+      <div id="status" class="status" aria-live="polite"></div>
+      <p id="stale" class="stale" hidden>Чертёж по последним допустимым значениям: в одном из полей не число или число вне допустимого диапазона.</p>
+      <figure id="chord-figure" hidden>
+        <figcaption>Допуск хорды <span class="tag">схема, прогиб увеличен</span></figcaption>
+        <div id="chord" class="drawing drawing-chord"></div>
+      </figure>
+      <div class="views">
+        <figure id="plan-figure">
+          <figcaption>Поперечный разрез по полотну <span class="tag" id="plan-tag">в масштабе</span></figcaption>
+          <div id="plan" class="drawing"></div>
+        </figure>
+        <figure id="section-figure">
+          <figcaption>Осевой разрез <span class="tag" id="section-tag">в масштабе</span></figcaption>
+          <div id="section" class="drawing"></div>
+        </figure>
+        <figure id="tooth-figure" hidden>
+          <figcaption>Зубья крупно <span class="tag" id="tooth-tag">в масштабе</span></figcaption>
+          <div id="tooth" class="drawing"></div>
+        </figure>
+        <figure id="helix-figure" hidden>
+          <figcaption>Зубья сбоку <span class="tag">в масштабе, линии зубьев на делительном цилиндре</span></figcaption>
+          <div id="helix" class="drawing"></div>
+        </figure>
+      </div>
+      <p class="drawing-help">Щёлкните по размеру, чтобы перейти к его полю, или по части детали, чтобы открыть её раздел.</p>
+    </section>
+  </main>
+  <footer class="credits">
+    Gears <span id="version"></span> · © 2026 Иван Поляков ·
+    <a href="https://github.com/Cooler2/gears">исходный код на GitHub</a> ·
+    <a href="https://github.com/Cooler2/gears/blob/main/LICENSE">Elastic License 2.0</a> ·
+    созданные модели ваши, без ограничений
+  </footer>
+</body>
+</html>

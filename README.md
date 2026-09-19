@@ -1,8 +1,8 @@
-# Gears: GT2 pulley and gear generator
+# Gears: gear and pulley generator
 
 Site: **https://apus-software.com/gears/** · [Русский](README.ru.md)
 
-A browser generator of power transmission parts for 3D printing: a GT2 timing pulley, a smooth pulley (a tensioner or a belt idler) and an involute gear with straight, helical or herringbone teeth. Parameters are set in groups with explanatory drawings, and the part is built locally in a background thread of the browser. The result is shown in 3D and downloaded as STL. The interface is in Russian for now.
+A browser generator of power transmission parts for 3D printing: a GT2 timing pulley, a smooth pulley (a tensioner or a belt idler) and an involute gear with straight, helical or herringbone teeth. Parameters are set in groups with explanatory drawings, and the part is built locally in a background thread of the browser. The result is shown in 3D and downloaded as STL. The interface is in English, with a Russian page at `index_ru.html`.
 
 No generation server is needed: the JavaScript core runs both in the browser and in Node.js. There are no external dependencies and no build step; only Node.js 20 or newer is needed, for the local server, the command line and the tests.
 
@@ -14,9 +14,9 @@ The web, the hub and the bore are shared by all part kinds, flanges belong to pu
 npm run ui          # or node tools/serve.js 8517
 ```
 
-Then open `http://127.0.0.1:8517/`. The server serves the project files and listens on `127.0.0.1` only; it is needed because browsers do not load ES modules, the schema and the examples from `file://`. If the port is taken, pass another one: `npm run ui -- 8518`. The address `localhost` may not work: browsers often try the IPv6 address `::1` first, where another program may answer.
+Then open `http://127.0.0.1:8517/` (the Russian page is `http://127.0.0.1:8517/src/ui/index_ru.html`). The server serves the project files and listens on `127.0.0.1` only; it is needed because browsers do not load ES modules, the schema and the examples from `file://`. If the port is taken, pass another one: `npm run ui -- 8518`. The address `localhost` may not work: browsers often try the IPv6 address `::1` first, where another program may answer.
 
-The workflow: on the «Варианты» (variants) page you choose a part kind and a ready-made variant or a new part with default sizes, then set the parameters group by group — the rim, flanges, web and spokes, hub, shaft bore, model accuracy. Values are kept in `localStorage`; an address like `#group=web&field=/web/filletRadius` opens the group with the field focused. Next to the form, drawings explain every field: cross and axial sections, the chord tolerance diagram, and for a gear also close-up and side views of the teeth. Clicking a dimension goes to its field, clicking a part of the drawing opens its group. Errors and recommendations are shown next to the fields. «Скачать STL» (download STL) saves the part standing on the bed with its bottom face, «Сохранить» (save) and «Открыть» (open) save and load its description as JSON.
+The workflow: on the Presets page you choose a part kind and a ready-made preset or a new part with default sizes, then set the parameters group by group — the rim, flanges, web and spokes, hub, shaft bore, model accuracy. Values are kept in `localStorage`; an address like `#group=web&field=/web/filletRadius` opens the group with the field focused. Next to the form, drawings explain every field: cross and axial sections, the chord tolerance diagram, and for a gear also close-up and side views of the teeth. Clicking a dimension goes to its field, clicking a part of the drawing opens its group. Errors and recommendations are shown next to the fields. Download STL saves the part standing on the bed with its bottom face, Save and Open save and load its description as JSON.
 
 ## Supported parts
 
@@ -69,7 +69,7 @@ The `--blender` option is optional: with it, Blender in background mode addition
 node --test
 ```
 
-75 tests, about 15 seconds, no browser needed. The core is checked for reproducibility, profile formulas, related constraints and mesh invariants — orientation, closed edges, a single connected shell, positive volume; contour shapes and volume are compared with the analytical description, and the STL is read back by a separate parser. Form tests make sure every visible field has a dimension on the drawing of its group and every diagnostic has a text. Integration tests check the background thread: agreement with the core, the request queue, cancelling a long build and replacing a crashed thread. The end-to-end browser check is manual.
+77 tests, about 15 seconds, no browser needed. The core is checked for reproducibility, profile formulas, related constraints and mesh invariants — orientation, closed edges, a single connected shell, positive volume; contour shapes and volume are compared with the analytical description, and the STL is read back by a separate parser. Form tests make sure every visible field has a dimension on the drawing of its group and every diagnostic has a text, and that the English and the Russian dictionaries have the same keys. Integration tests check the background thread: agreement with the core, the request queue, cancelling a long build and replacing a crashed thread. The end-to-end browser check is manual.
 
 ## Building the site
 
@@ -78,17 +78,17 @@ npm run site                    # or node tools/build-site.js [directory]
 node tools/serve.js 8517 dist   # check the built site
 ```
 
-The build puts a static site into `dist/`: the page at the root, the modules, the schema and the examples next to it, without bundling or minification. Any static web server can serve the directory, for example nginx at `/gears/`; it has to serve `.js` as JavaScript and `.json` and `.svg` with their own types. There is no server side.
+The build puts a static site into `dist/`: both pages at the root, the modules, the schema and the examples next to it, without bundling or minification. Any static web server can serve the directory, for example nginx at `/gears/`; it has to serve `.js` as JavaScript and `.json` and `.svg` with their own types. There is no server side.
 
 ## Layout
 
 - `src/core/` — the core, free of the browser and DOM: structure and diagnostics (`parameters.js`), rims and profiles (`rims.js`, `involute.js`, `contours.js`), spokes, mesh assembly and verification, drawing geometry, the entry point `generate.js`;
 - `src/export/stl.js` — binary STL and placement on the bed;
 - `src/worker/` — the background thread and its client: request queue, answer freshness, timeout and restart;
-- `src/ui/` — the interface: fields and groups, state, SVG drawings, diagnostic texts, ready-made variants, a WebGL 3D view without libraries;
+- `src/ui/` — the interface: fields and groups, state, SVG drawings, diagnostic texts, presets, a WebGL 3D view without libraries; all texts are in the dictionaries `locale-en.js` and `locale-ru.js`;
 - `src/cli/generate.js` — generation from JSON;
 - `src/about.js` — version, author and addresses, which sign the page and the generated files;
-- `tools/` — local server, site and catalogue builds, Blender check; the core does not need them.
+- `tools/` — local server, site and catalogue builds, Blender check, the link preview picture (`og-image.html`, rendered to `src/ui/og-*.png`); the core does not need them.
 
 ## Known limitations
 

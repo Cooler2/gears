@@ -4,7 +4,7 @@
 // the examples, which browsers refuse to do from file://. Serves the project root.
 //
 //   node tools/serve.js [port]      then open http://127.0.0.1:<port>/src/ui/
-//   node tools/serve.js 8517 dist   the built site (tools/build-site.js), page at the root
+//   node tools/serve.js 8517 dist   the built site (tools/build-site.js), pages at the root
 
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";

@@ -1,24 +1,20 @@
 // Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
-// Numbers for people: up to `digits` decimals, trailing zeros dropped,
-// decimal comma and typographic minus as in Russian technical texts.
+// Numbers for people: up to `digits` decimals, trailing zeros dropped, a decimal
+// point in every language and a typographic minus.
 export function formatNumber(value, digits = 2) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   const rounded = Number(value.toFixed(digits));
-  return String(Object.is(rounded, -0) ? 0 : rounded).replace(".", ",").replace("-", "−");
+  return String(Object.is(rounded, -0) ? 0 : rounded).replace("-", "−");
 }
 
-/** Russian noun form for a count: plural(3, "треугольник", "треугольника", "треугольников"). */
-export function plural(count, one, few, many) {
-  const tens = Math.abs(count) % 100;
-  const units = tens % 10;
-  if (tens >= 11 && tens <= 14) return many;
-  if (units === 1) return one;
-  return units >= 2 && units <= 4 ? few : many;
+/** A count with thousands apart by a thin space: 12 345. */
+export function formatCount(value) {
+  return String(value).replace(/\B(?=(\d{3})+$)/g, " ");
 }
 
-/** Text for an input box: numbers with a decimal comma, anything else as typed. */
+/** Text for an input box: numbers as they are, anything else as typed. */
 export function inputText(value) {
-  return typeof value === "number" ? String(value).replace(".", ",") : String(value ?? "");
+  return typeof value === "number" ? String(value) : String(value ?? "");
 }
 
 /** "T_r" → base "T" and subscript "r"; symbols without "_" have no subscript. */
