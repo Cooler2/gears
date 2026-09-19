@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // Form state: the contract description plus values remembered for hidden parts.
 //
 // The description itself follows the contract: switching the web to solid drops

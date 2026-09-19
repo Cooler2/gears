@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // Pulley form: groups of fields, live drawings, diagnostics next to the fields,
 // and the 3D preview of the built part.
 //
@@ -10,6 +11,7 @@
 
 import { buildPlanView, validateDescription } from "../core/generate.js";
 import { exportBinaryStl } from "../export/stl.js";
+import { GENERATOR, VERSION } from "../about.js";
 import { BuildClient } from "../worker/client.js";
 import { chordSummary, renderChord, renderHelix, renderPlan, renderSection, renderTooth } from "./drawings.js";
 import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle, kindOf } from "./fields.js";
@@ -40,14 +42,16 @@ const el = {
 
 let schema, presets;
 try {
-  schema = await fetchJson("../../schemas/pulley-v5.schema.json");
-  presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(`../../examples/valid/${preset.file}`) })));
+  // relative to this module rather than the page: the published page sits at the site root
+  schema = await fetchJson(new URL("../../schemas/pulley-v5.schema.json", import.meta.url));
+  presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(new URL(`../../examples/valid/${preset.file}`, import.meta.url)) })));
 } catch (error) {
   $("#boot").className = "notice notice-error";
   $("#boot").textContent = `Не удалось загрузить схему или примеры (${error.message}). Страница должна раздаваться из корня проекта: npm run ui.`;
   throw error;
 }
 $("#boot").hidden = true;
+$("#version").textContent = VERSION;
 
 let state = restoreState() ?? createState(schema);
 // the page opens on the variants; a bookmarked group or field opens the editor directly
@@ -688,7 +692,7 @@ $("#save").addEventListener("click", () => {
     showNotice("Сначала исправьте поля с ошибкой формата: сохраняется только описание, которое можно прочитать обратно.", "error");
     return;
   }
-  const blob = new Blob([`${JSON.stringify(result.normalized, null, 2)}\n`], { type: "application/json" });
+  const blob = new Blob([`${JSON.stringify({ generator: GENERATOR, ...result.normalized }, null, 2)}\n`], { type: "application/json" });
   download(blob, `${partFileName(result.normalized)}.json`);
   showNotice(result.ok ? "Описание сохранено." : "Описание сохранено, но в нём есть ошибки размеров.");
 });

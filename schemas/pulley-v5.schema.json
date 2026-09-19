@@ -59,6 +59,10 @@
     },
     "generation": {
       "$ref": "#/$defs/generation"
+    },
+    "generator": {
+      "type": "string",
+      "description": "Optional note naming the program that wrote the file, for example \"Gears 1.0.0 by Ivan Polyacov, apus-software.com/gears\". It carries no geometry and is dropped on normalization."
     }
   },
   "allOf": [

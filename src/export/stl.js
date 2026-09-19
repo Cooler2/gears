@@ -1,3 +1,6 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+import { GENERATOR } from "../about.js";
+
 export function exportBinaryStl(mesh, { placement = "model" } = {}) {
   if (!mesh || mesh.primitive !== "triangles" || mesh.units !== "mm") {
     throw new TypeError("A successful millimetre triangle mesh is required");
@@ -10,7 +13,7 @@ export function exportBinaryStl(mesh, { placement = "model" } = {}) {
   const buffer = new ArrayBuffer(84 + 50 * triangleCount);
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
-  const header = new TextEncoder().encode("Gears GT2 experimental; coordinates in millimetres");
+  const header = new TextEncoder().encode(`${GENERATOR}; units mm`) // ASCII, under 80 bytes;
   bytes.set(header.slice(0, 80));
   view.setUint32(80, triangleCount, true);
   let offset = 84;

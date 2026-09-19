@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // Builds the example catalog: bed-ready STL files and catalog.json with sizes, diagnostics
 // and check results. Optional --blender=<blender.exe> adds the independent Blender
 // inspection (tools/blender-inspect.py) and an overview PNG for every model.

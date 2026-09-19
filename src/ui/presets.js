@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // Ready-made variants: files from examples/valid with a title for people.
 // The variants page groups them by the kind written in the file. All but one lie flat
 // on their lower face, ready to print.

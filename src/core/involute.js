@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // Involute gear tooth outline in the transverse plane (perpendicular to the axis).
 //
 // Standard basic rack: addendum 1·m, dedendum 1.25·m, measured from the pitch

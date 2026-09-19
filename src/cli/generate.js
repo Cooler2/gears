@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { generatePulley } from "../core/generate.js";

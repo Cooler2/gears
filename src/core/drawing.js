@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 import { buildBoreContour } from "./contours.js";
 import { rimSurface } from "./rims.js";
 import { layoutSpokes } from "./spokes.js";

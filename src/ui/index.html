@@ -1,9 +1,14 @@
 <!doctype html>
+<!-- Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE -->
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Шкивы — генератор</title>
+  <title>Шкивы и шестерни — генератор</title>
+  <meta name="description" content="Генератор шкивов GT2, гладких роликов и шестерён с прямыми, косыми и шевронными зубьями для 3D-печати: параметры с чертежами, 3D-просмотр и STL прямо в браузере.">
+  <meta name="author" content="Иван Поляков">
+  <link rel="canonical" href="https://apus-software.com/gears/">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="app.js"></script>
 </head>
@@ -21,7 +26,7 @@
       <input type="file" id="file-input" accept=".json,application/json" hidden>
     </div>
   </header>
-  <p id="boot" class="notice">Загрузка… Если страница так и не заработала, её открыли без локального сервера: браузеры не загружают модули с file://. Запустите <code>npm run ui</code> и откройте http://127.0.0.1:8080/.</p>
+  <p id="boot" class="notice">Загрузка… Если страница так и не заработала, её открыли без локального сервера: браузеры не загружают модули с file://. Запустите <code>npm run ui</code> и откройте http://127.0.0.1:8517/.</p>
   <p id="notice" class="notice" role="status" hidden></p>
   <main class="layout">
     <div class="side">
@@ -76,5 +81,11 @@
       <p class="drawing-help">Щёлкните по размеру, чтобы перейти к его полю, или по части детали, чтобы открыть её раздел.</p>
     </section>
   </main>
+  <footer class="credits">
+    Gears <span id="version"></span> · © 2026 Иван Поляков ·
+    <a href="https://github.com/Cooler2/gears">исходный код на GitHub</a> ·
+    <a href="https://github.com/Cooler2/gears/blob/main/LICENSE">Elastic License 2.0</a> ·
+    созданные модели ваши, без ограничений
+  </footer>
 </body>
 </html>

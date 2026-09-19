@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // SVG drawings that explain the form fields.
 //
 // Geometry comes from the core (buildPlanView, derived sizes, anchors); this module

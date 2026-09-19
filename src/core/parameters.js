@@ -1,9 +1,11 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 import { boreExtents } from "./contours.js";
 import { gearGeometry } from "./involute.js";
 import { HELICES, PART_KINDS, rimFields, rimRadii, rimSizePath, rimSurface } from "./rims.js";
 
 const SCHEMA_VERSION = 5;
 const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "bore", "generation"];
+const OPTIONAL_ROOT_FIELDS = ["generator"]; // the program that wrote the file; not geometry, dropped on normalization
 const FLANGES_FIELDS = ["lower", "upper"];
 const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
 const SOLID_WEB_FIELDS = ["type", "thinning", "alignment", "axialOffset"];
@@ -152,7 +154,10 @@ function buildAnchors(input, derived) {
 }
 
 function validateStatic(input, diagnostics) {
-  exactObject(input, ROOT_FIELDS, "", diagnostics);
+  exactObject(input, ROOT_FIELDS, "", diagnostics, OPTIONAL_ROOT_FIELDS);
+  if (isRecord(input) && Object.hasOwn(input, "generator") && typeof input.generator !== "string") {
+    schemaError(diagnostics, "/generator", "type", { type: "string" });
+  }
   enumeration(input.kind, PART_KINDS, "/kind", diagnostics);
   constant(input.units, "mm", "/units", diagnostics);
 
@@ -446,7 +451,7 @@ function normalize(input) {
   };
 }
 
-function exactObject(value, fields, path, diagnostics) {
+function exactObject(value, fields, path, diagnostics, optional = []) {
   if (!isRecord(value)) {
     schemaError(diagnostics, path, "object");
     return false;
@@ -455,7 +460,7 @@ function exactObject(value, fields, path, diagnostics) {
     if (!Object.hasOwn(value, field)) schemaError(diagnostics, `${path}/${field}`, "required");
   }
   for (const field of Object.keys(value)) {
-    if (!fields.includes(field)) schemaError(diagnostics, `${path}/${field}`, "additionalProperty");
+    if (!fields.includes(field) && !optional.includes(field)) schemaError(diagnostics, `${path}/${field}`, "additionalProperty");
   }
   return fields.every((field) => Object.hasOwn(value, field));
 }

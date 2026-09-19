@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 /**
  * Surface primitives for an indexed triangle mesh assembled from shared
  * boundaries.

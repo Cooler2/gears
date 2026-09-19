@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // 3D preview of the built mesh: plain WebGL, no libraries, rendered on demand.
 //
 // The part is drawn flat-shaded, facet by facet, as the STL really is. Faces seen

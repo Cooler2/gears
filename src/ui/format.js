@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // Numbers for people: up to `digits` decimals, trailing zeros dropped,
 // decimal comma and typographic minus as in Russian technical texts.
 export function formatNumber(value, digits = 2) {

@@ -1,3 +1,4 @@
+# Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 # Independent mesh inspection and overview renders in Blender (not part of the core).
 #
 #   blender -b --factory-startup --python tools/blender-inspect.py -- OUT_DIR MODEL.stl [MODEL.stl ...]

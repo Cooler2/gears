@@ -1,3 +1,4 @@
+// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
 // Russian texts for contract diagnostics. The core returns only codes, paths and
 // numeric details; every sentence a person reads is composed here.
 import { formatNumber as n } from "./format.js";

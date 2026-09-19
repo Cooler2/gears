@@ -3,3 +3,6 @@ gear-generator-brief.md
 out/
 dist/
 node_modules/
+# working notes, not published
+WORK_PLAN.md
+docs/stage-*-report.md
