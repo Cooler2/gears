@@ -1,108 +1,108 @@
-# Gears: генератор шкивов GT2 и шестерён
+# Gears: GT2 pulley and gear generator
 
-Сайт: **https://apus-software.com/gears/** · [English](README.en.md)
+Site: **https://apus-software.com/gears/** · [Русский](README.ru.md)
 
-Браузерный генератор деталей передач для 3D-печати: зубчатого шкива GT2, гладкого шкива (ролика натяжителя или обводного ролика ремня) и эвольвентной шестерни с прямыми, косыми или шевронными зубьями. Параметры задаются по группам с поясняющими чертежами, деталь строится локально в фоновом потоке браузера. Результат виден в 3D и скачивается как STL.
+A browser generator of power transmission parts for 3D printing: a GT2 timing pulley, a smooth pulley (a tensioner or a belt idler) and an involute gear with straight, helical or herringbone teeth. Parameters are set in groups with explanatory drawings, and the part is built locally in a background thread of the browser. The result is shown in 3D and downloaded as STL. The interface is in Russian for now.
 
-Сервер генерации не нужен: ядро на JavaScript работает и в браузере, и в Node.js. Внешних зависимостей и шага сборки нет, нужен только Node.js 20 или новее — для локального сервера, командной строки и тестов.
+No generation server is needed: the JavaScript core runs both in the browser and in Node.js. There are no external dependencies and no build step; only Node.js 20 or newer is needed, for the local server, the command line and the tests.
 
-Полотно, втулка и отверстие у всех видов детали общие, фланцы — только у шкивов. Поддерживаются любые сочетания верхнего и нижнего фланцев, сплошное полотно или прямые спицы с сопряжениями, прижатые к низу, к верху или по центру детали, независимые выступы втулки, в том числе отрицательные, и четыре формы сквозного отверстия: круглое, многоугольное, D-образное (с лыской) и со шпоночным пазом.
+The web, the hub and the bore are shared by all part kinds, flanges belong to pulleys only. Supported are any combination of lower and upper flanges, a solid web or straight spokes with fillets placed at the bottom, the top or the middle of the part, independent hub extensions, negative ones included, and four bore shapes: round, polygonal, D-shaped (with a flat) and keyed.
 
-## Запуск
+## Running
 
 ```powershell
-npm run ui          # или node tools/serve.js 8517
+npm run ui          # or node tools/serve.js 8517
 ```
 
-Затем откройте `http://127.0.0.1:8517/`. Сервер раздаёт файлы проекта и слушает только `127.0.0.1`; он нужен потому, что браузер не загружает ES-модули, схему и примеры с `file://`. Если порт занят, передайте другой: `npm run ui -- 8518`. Адрес `localhost` может не подойти — браузер часто сначала пробует IPv6-адрес `::1`, где отвечает другая программа.
+Then open `http://127.0.0.1:8517/`. The server serves the project files and listens on `127.0.0.1` only; it is needed because browsers do not load ES modules, the schema and the examples from `file://`. If the port is taken, pass another one: `npm run ui -- 8518`. The address `localhost` may not work: browsers often try the IPv6 address `::1` first, where another program may answer.
 
-Работа идёт так: на странице «Варианты» выбирается вид детали и готовый вариант или новая деталь с размерами по умолчанию, дальше параметры задаются по группам — венец, фланцы, полотно и спицы, втулка, отверстие под вал, точность модели. Значения сохраняются в `localStorage`, адрес вида `#group=web&field=/web/filletRadius` открывает группу с полем в фокусе. Рядом с формой чертежи объясняют каждое поле: поперечный и осевой разрезы, схема допуска хорды, а у шестерни ещё «Зубья крупно» и «Зубья сбоку». Щелчок по размеру переводит к его полю, щелчок по части детали открывает её группу. Ошибки и рекомендации показаны у полей. Кнопка «Скачать STL» выгружает деталь, стоящую на столе нижней гранью, «Сохранить JSON» и «Открыть JSON» — её описание.
+The workflow: on the «Варианты» (variants) page you choose a part kind and a ready-made variant or a new part with default sizes, then set the parameters group by group — the rim, flanges, web and spokes, hub, shaft bore, model accuracy. Values are kept in `localStorage`; an address like `#group=web&field=/web/filletRadius` opens the group with the field focused. Next to the form, drawings explain every field: cross and axial sections, the chord tolerance diagram, and for a gear also close-up and side views of the teeth. Clicking a dimension goes to its field, clicking a part of the drawing opens its group. Errors and recommendations are shown next to the fields. «Скачать STL» (download STL) saves the part standing on the bed with its bottom face, «Сохранить» (save) and «Открыть» (open) save and load its description as JSON.
 
-## Поддерживаемые детали
+## Supported parts
 
-| Параметр | Диапазон | По умолчанию |
+| Parameter | Range | Default |
 | --- | --- | --- |
-| Шкив GT2: число канавок `N` | 14…120 | 40 |
-| Гладкий шкив: диаметр обода `D` | 5…150 мм | 20 |
-| Шестерня: модуль `m` | 0,3…10 мм | 1 |
-| Шестерня: число зубьев `N` | 6…200 | 30 |
-| Шестерня: угол давления `α` | 14,5…30° | 20 |
-| Шестерня: коэффициент смещения `x` | −1…1 | 0 |
-| Шестерня: утонение зуба `j` | 0…1 мм | 0,1 |
-| Шестерня: зубья / угол наклона `β` | прямые, косые, шеврон / −45…45° | прямые / 20 |
-| Ширина зубчатой части, венца шестерни или обода `W` | 2…50 мм | 6 |
-| Обод под канавками или зубьями, стенка гладкого обода `T_r` (по радиусу) | 1…25 мм | 2 |
-| Фланец шкива: толщина / выступ за вершины или поверхность обода | 0,4…5 / 0,5…10 мм | 1 / 1 |
-| Полотно или спицы: утонение / прижатие / сдвиг | 0…59 мм / к низу, по центру, к верху / −60…60 мм | 0 / к низу / 0 |
-| Спицы: число / ширина / радиус сопряжений | 3…12 / 1…20 / 0,5…10 мм | 6 / 2,5 / 1 |
-| Наружный диаметр втулки | 2…100 мм | 10 |
-| Отверстие: диаметр (у многоугольника — описанной окружности) | 0,5…50 мм | 5, круглое |
-| Многоугольное: число граней | 3…12 | 6 |
-| D-образное: размер по лыске | 0,3…50 мм, больше `d/2` и меньше `d` | 4,5 |
-| Шпоночный паз: ширина / глубина от окружности | 0,3…20 / 0,2…10 мм, ширина меньше `d` | 2 / 1 |
-| Выступы втулки вниз и вверх от плоскостей детали | −5…50 мм | 0 |
-| Допуск хорды | 0,01…0,25 мм | 0,05 |
+| GT2 pulley: groove count `N` | 14…120 | 40 |
+| Smooth pulley: rim diameter `D` | 5…150 mm | 20 |
+| Gear: module `m` | 0.3…10 mm | 1 |
+| Gear: tooth count `N` | 6…200 | 30 |
+| Gear: pressure angle `α` | 14.5…30° | 20 |
+| Gear: profile shift coefficient `x` | −1…1 | 0 |
+| Gear: tooth thinning `j` | 0…1 mm | 0.1 |
+| Gear: teeth / helix angle `β` | straight, helical, herringbone / −45…45° | straight / 20 |
+| Width of the toothed part, gear rim or smooth rim `W` | 2…50 mm | 6 |
+| Rim under the grooves or teeth, smooth rim wall `T_r` (radial) | 1…25 mm | 2 |
+| Pulley flange: thickness / extension beyond the tips or the rim surface | 0.4…5 / 0.5…10 mm | 1 / 1 |
+| Web or spokes: thinning / alignment / offset | 0…59 mm / bottom, centre, top / −60…60 mm | 0 / bottom / 0 |
+| Spokes: count / width / fillet radius | 3…12 / 1…20 / 0.5…10 mm | 6 / 2.5 / 1 |
+| Hub outer diameter | 2…100 mm | 10 |
+| Bore: diameter (circumscribed circle for a polygon) | 0.5…50 mm | 5, round |
+| Polygonal bore: side count | 3…12 | 6 |
+| D-shaped bore: size across the flat | 0.3…50 mm, over `d/2` and under `d` | 4.5 |
+| Keyed bore: key width / depth from the circle | 0.3…20 / 0.2…10 mm, width under `d` | 2 / 1 |
+| Hub extensions below and above the faces of the part | −5…50 mm | 0 |
+| Chord tolerance | 0.01…0.25 mm | 0.05 |
 
-Помимо диапазонов действуют связанные ограничения: толщина зуба после утонения и впадина между зубьями, стенка втулки в самом тонком месте, место между втулкой и венцом, толщина полотна не меньше 1 мм, полотно в пределах детали, втулка на всю высоту полотна, сопряжения и раскладка спиц. Их нарушение объясняется у поля. Шестерня предупреждает о подрезании ножки при малом числе зубьев и о заострённых зубьях. У косых зубьев направление наклона задаёт знак угла: плюс — правые, минус — левые; у пары знаки разные.
+Besides the ranges, related constraints apply: tooth thickness after thinning and the space between teeth, the hub wall at its thinnest point, room between the hub and the rim, a web at least 1 mm thick, the web within the part, the hub along the whole height of the web, fillets and the spoke layout. A violation is explained next to the field. A gear warns about root undercut at small tooth counts and about pointed teeth. The sign of the helix angle sets the hand: plus is right-hand, minus is left-hand; the two gears of a pair have opposite signs.
 
-Формат описания — `schemaVersion: 5`: поле `kind` (`timingPulley`, `idlerPulley` или `gear`) выбирает вид венца. Полотно и втулка отсчитываются от плоскостей детали — дальних плоскостей фланцев, а без фланца от торцов венца. По умолчанию полотно прижато к низу, и деталь лежит на столе плоским основанием. Файлы прежних версий открываются и читаются с той же геометрией, сохраняются уже в версии 5. Полная спецификация — [`docs/contract.md`](docs/contract.md), геометрия и допущения — [`docs/geometry.md`](docs/geometry.md), схема — [`schemas/pulley-v5.schema.json`](schemas/pulley-v5.schema.json).
+The description format is `schemaVersion: 5`: the `kind` field (`timingPulley`, `idlerPulley` or `gear`) selects the rim. The web and the hub are measured from the faces of the part — the outer faces of the flanges, or the rim ends without a flange. By default the web is aligned to the bottom, and the part lies on the bed on its flat base. Files of earlier versions open and read with the same geometry and are saved as version 5. The full specification is [`docs/contract.md`](docs/contract.md), geometry and assumptions are in [`docs/geometry.md`](docs/geometry.md), the schema is [`schemas/pulley-v5.schema.json`](schemas/pulley-v5.schema.json); the documents are in Russian.
 
-## Командная строка
+## Command line
 
 ```powershell
 node src/cli/generate.js examples/valid/solid-basic.json out/solid-basic.stl --placement=onBed
 ```
 
-Каталог для выходного файла должен существовать. По умолчанию STL хранит каноническую модель, центрированную по `z=0`; `--placement=onBed` ставит её на стол, как кнопка в браузере, и такой файл побайтно совпадает с выгруженным из браузера. Команда печатает габариты, число вершин и треугольников, а при ошибке — стабильные коды диагностик.
+The output directory must exist. By default the STL keeps the canonical model centred on `z=0`; `--placement=onBed` puts it on the bed, like the browser button, and such a file is byte-identical to the one downloaded from the browser. The command prints the size, the vertex and triangle counts, and on failure stable diagnostic codes.
 
-Сборка каталога всех примеров — STL и `catalog.json` с размерами, диагностиками и хешами:
+Building a catalogue of all examples — STL files and `catalog.json` with sizes, diagnostics and hashes:
 
 ```powershell
 node tools/build-catalog.js out/catalog "--blender=C:\Program Files\Blender 4.5\blender.exe"
 ```
 
-Ключ `--blender` необязателен: с ним Blender в фоновом режиме дополнительно проверяет каждую сетку — самопересечения, многообразность, объём, площадь навесов — и рендерит обзорную картинку.
+The `--blender` option is optional: with it, Blender in background mode additionally checks every mesh — self-intersections, manifoldness, volume, overhang area — and renders an overview picture.
 
-## Проверки
+## Tests
 
 ```powershell
 node --test
 ```
 
-75 тестов, около 15 секунд, браузер не нужен. Ядро проверяется на воспроизводимость, формулы профилей, связанные ограничения и инварианты сетки — ориентацию, замкнутость рёбер, одну связную оболочку, положительный объём; форма контуров и объём сверяются с аналитическим описанием, STL читается отдельным парсером. Тесты формы следят за тем, что у каждого видимого поля есть размер на чертеже его группы, а у каждой диагностики — текст. Тесты интеграции проверяют фоновый поток: совпадение с ядром, очередь запросов, отмену долгого построения и замену упавшего потока. Сквозная проверка в браузере выполняется вручную.
+75 tests, about 15 seconds, no browser needed. The core is checked for reproducibility, profile formulas, related constraints and mesh invariants — orientation, closed edges, a single connected shell, positive volume; contour shapes and volume are compared with the analytical description, and the STL is read back by a separate parser. Form tests make sure every visible field has a dimension on the drawing of its group and every diagnostic has a text. Integration tests check the background thread: agreement with the core, the request queue, cancelling a long build and replacing a crashed thread. The end-to-end browser check is manual.
 
-## Сборка сайта
+## Building the site
 
 ```powershell
-npm run site                    # или node tools/build-site.js [каталог]
-node tools/serve.js 8517 dist   # проверить собранный сайт
+npm run site                    # or node tools/build-site.js [directory]
+node tools/serve.js 8517 dist   # check the built site
 ```
 
-Сборка кладёт в `dist/` статический сайт: страница в корне, рядом модули, схема и примеры — без упаковки и минификации. Каталог раздаётся любым статическим сервером, например nginx по адресу `/gears/`; сервер должен отдавать `.js` как JavaScript, `.json` и `.svg` — со своими типами. Серверной части нет.
+The build puts a static site into `dist/`: the page at the root, the modules, the schema and the examples next to it, without bundling or minification. Any static web server can serve the directory, for example nginx at `/gears/`; it has to serve `.js` as JavaScript and `.json` and `.svg` with their own types. There is no server side.
 
-## Устройство
+## Layout
 
-- `src/core/` — ядро без браузера и DOM: структура и диагностики (`parameters.js`), венцы и профили (`rims.js`, `involute.js`, `contours.js`), спицы, сборка и проверка сетки, геометрия чертежей, точка входа `generate.js`;
-- `src/export/stl.js` — бинарный STL и размещение на столе;
-- `src/worker/` — фоновый поток и клиент к нему: очередь запросов, актуальность ответов, таймаут и перезапуск;
-- `src/ui/` — интерфейс: поля и группы, состояние, SVG-чертежи, тексты диагностик, готовые варианты, 3D-просмотр на WebGL без библиотек;
-- `src/cli/generate.js` — генерация из JSON;
-- `src/about.js` — версия, автор и адреса; ими подписываются страница и создаваемые файлы;
-- `tools/` — локальный сервер, сборка сайта и каталога, проверка в Blender; ядру они не нужны.
+- `src/core/` — the core, free of the browser and DOM: structure and diagnostics (`parameters.js`), rims and profiles (`rims.js`, `involute.js`, `contours.js`), spokes, mesh assembly and verification, drawing geometry, the entry point `generate.js`;
+- `src/export/stl.js` — binary STL and placement on the bed;
+- `src/worker/` — the background thread and its client: request queue, answer freshness, timeout and restart;
+- `src/ui/` — the interface: fields and groups, state, SVG drawings, diagnostic texts, ready-made variants, a WebGL 3D view without libraries;
+- `src/cli/generate.js` — generation from JSON;
+- `src/about.js` — version, author and addresses, which sign the page and the generated files;
+- `tools/` — local server, site and catalogue builds, Blender check; the core does not need them.
 
-## Известные ограничения
+## Known limitations
 
-- Профиль `gt2-2mm-experimental-v1` экспериментальный: шаг и наружный диаметр сверены с каталогом, форма канавки подтверждается только печатью. Посадка ремня на пробных шкивах не проверена.
-- Шестерня строится без скругления у основания зуба, настоящее подрезание ножки не моделируется: ниже основной окружности боковая сторона идёт по радиусу, при малом числе зубьев выдаётся предупреждение. Проверки пары — межосевого расстояния и зацепления — нет, одинаковые модуль, угол давления и величину наклона пары пользователь выдерживает сам. Зацепление напечатанных шестерён не проверялось.
-- Нагрузочная пригодность не заявляется. Компенсация отверстий принтера в модель не заложена: зазор посадки задаётся в диаметре отверстия.
-- Верхний фланец печатается навесом над канавками, и его нижняя грань выходит неровной.
-- Полная проверка самопересечений в ядре не выполняется: неудачные сочетания параметров в пределах ограничений могут дать некорректную модель.
-- Проверены Chrome и Edge на Windows, оба на движке Chromium; Firefox и Safari не проверялись. Без WebGL 3D-просмотр заменяется сообщением, построение и STL работают.
+- The `gt2-2mm-experimental-v1` profile is experimental: the pitch and the outside diameter match the catalogue, the groove shape is confirmed by printing only. Belt fit on test pulleys has not been checked.
+- Gears are built without a root fillet, and real undercut is not modelled: below the base circle the flank runs radially, and a warning is shown for small tooth counts. Gear pairs — centre distance and meshing — are not checked; keeping the same module, pressure angle and helix angle magnitude in a pair is up to the user. Meshing of printed gears has not been tested.
+- No load rating is claimed. Printer hole compensation is not built into the model: put the fit clearance into the bore diameter.
+- The upper flange is printed as an overhang above the grooves, and its lower face comes out rough.
+- The core does not fully check self-intersections: unlucky parameter combinations within the limits can give an incorrect model.
+- Tested in Chrome and Edge on Windows, both Chromium-based; Firefox and Safari have not been tested. Without WebGL the 3D view is replaced by a message; building and STL still work.
 
-## Автор и лицензия
+## Author and license
 
-Автор — Иван Поляков (Ivan Polyacov), © 2026. Версия — в `package.json` и `src/about.js`, выпуски отмечены тегами `vX.Y.Z`.
+Author: Ivan Polyacov, © 2026. The version is in `package.json` and `src/about.js`; releases are tagged `vX.Y.Z`.
 
-Код распространяется по [Elastic License 2.0](LICENSE): его можно читать, запускать у себя, изменять и присылать доработки. Нельзя размещать генератор как общедоступный сервис (публичную копию сайта) и удалять уведомления об авторстве и лицензии. Условия участия — в [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The code is licensed under the [Elastic License 2.0](LICENSE): you may read it, run it yourself, modify it and send improvements. You may not offer the generator as a publicly available service (a public copy of the site) or remove the authorship and license notices. Contribution terms are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-Созданные генератором модели — STL и JSON — принадлежат тому, кто их создал, и используются без ограничений, в том числе коммерчески. В заголовок STL и в поле `generator` JSON записываются название, версия и адрес программы; удалять их не запрещено.
+Models made with the generator — STL and JSON — belong to whoever made them and may be used without restriction, commercially included. The STL header and the JSON `generator` field carry the name, version and address of the program; removing them is allowed.
