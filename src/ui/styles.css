@@ -442,8 +442,9 @@ button {
 .keep-shaft { margin: 0 0 14px; }
 .preset-thumb svg { width: 100%; height: auto; display: block; }
 .preset-title { font-weight: 600; }
-.preset .tip { top: calc(100% + 4px); left: -10px; right: -10px; }
-.preset:is(:hover, :focus-visible) .tip { visibility: visible; }
+/* not rendered until shown: a merely invisible tip of the last row would lengthen the page */
+.preset .tip { display: none; top: calc(100% + 4px); left: -10px; right: -10px; }
+.preset:is(:hover, :focus-visible) .tip { display: block; visibility: visible; }
 
 /* drawings */
 
@@ -802,15 +803,10 @@ figcaption {
   .sizes { align-self: start; max-height: 100%; }
 }
 
-/* footer: authorship and links, one quiet line after the content */
-.credits { padding: 0 24px 10px; font-size: 12px; color: var(--muted); }
+/* footer: authorship and links, one quiet line under everything */
+.credits { flex: none; padding: 0 24px 10px; font-size: 12px; color: var(--muted); }
 .credits a { color: inherit; }
 @media (max-width: 860px) { .credits { padding: 0 16px 12px; } }
-/* the page fills the window exactly: the footer goes just below it, seen after scrolling down */
-@media (min-width: 861px) and (min-height: 600px) {
-  body { position: relative; }
-  .credits { position: absolute; top: 100%; left: 0; right: 0; }
-}
 
 /* the variants page: one column over the whole width, no drawings and no preview */
 body[data-page="presets"] .drawings,
@@ -819,5 +815,9 @@ body[data-page="presets"] .sizes { display: none; }
 body[data-page="presets"] .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "side"; }
 body[data-page="presets"] .side { display: flex; grid-area: side; }
 body[data-page="presets"] .form-panel { overflow: visible; }
+/* the gallery is a plain page: it scrolls as a whole, and the footer comes after the variants */
+body[data-page="presets"] { height: auto; min-height: 100vh; min-height: 100dvh; }
+body[data-page="presets"] .layout { flex: 1 0 auto; }
+body[data-page="presets"] .side { overflow: visible; }
 body[data-page="presets"] .presets { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 body[data-page="presets"] .preset-thumb svg { max-height: 130px; }
