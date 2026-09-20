@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Builds the public site: a static directory with the pages at its root.
 //
 //   node tools/build-site.js [outDir]      default dist/, emptied first

@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Texts of the page language: <html lang> of the page, English without a page (Node, tests).
 import en from "./locale-en.js";
 import ru from "./locale-ru.js";

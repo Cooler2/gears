@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 export function verifyMesh(mesh) {
   const errors = [];
   const edgeMap = new Map();

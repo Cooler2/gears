@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Worker side of the browser adapter: one request, one generatePulley call.
 // Kept apart from the Worker global scope so that Node tests run the same code.
 import { generatePulley } from "../core/generate.js";

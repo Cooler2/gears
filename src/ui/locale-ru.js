@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Russian texts of the page. The keys are the same as in locale-en.js, a test checks it.
 import { formatNumber as n } from "./format.js";
 import { isGear, isIdler, isInclined, isSpokes } from "./part.js";

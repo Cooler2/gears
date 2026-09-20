@@ -2,7 +2,7 @@
   "name": "gears-pulley-generator",
   "version": "1.0.0",
   "description": "GT2 timing pulleys, idler pulleys and spur, helical and herringbone gears for 3D printing, generated in the browser",
-  "author": "Ivan Polyacov",
+  "author": "Ivan Polyacov <ivan@apus-software.com>",
   "license": "Elastic-2.0",
   "homepage": "https://apus-software.com/gears/",
   "repository": "github:Cooler2/gears",

@@ -101,7 +101,7 @@ The build puts a static site into `dist/`: both pages at the root, the modules, 
 
 ## Author and license
 
-Author: Ivan Polyacov, © 2026. The version is in `package.json` and `src/about.js`; releases are tagged `vX.Y.Z`.
+Author: Ivan Polyacov, © 2026, <ivan@apus-software.com> — write about a bug, a question or a part kind you are missing. The version is in `package.json` and `src/about.js`; releases are tagged `vX.Y.Z`.
 
 The code is licensed under the [Elastic License 2.0](LICENSE): you may read it, run it yourself, modify it and send improvements. You may not offer the generator as a publicly available service (a public copy of the site) or remove the authorship and license notices. Contribution terms are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

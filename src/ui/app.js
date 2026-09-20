@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Pulley form: groups of fields, live drawings, diagnostics next to the fields,
 // and the 3D preview of the built part.
 //

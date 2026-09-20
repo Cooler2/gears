@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 import { diagnostic, validateDescription } from "./parameters.js";
 import { buildPulleyMesh } from "./mesh.js";
 import { MeshBuildError } from "./mesh-builder.js";

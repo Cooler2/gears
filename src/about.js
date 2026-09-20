@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Authorship and version: shown on the page and written into every generated file.
 
 export const VERSION = "1.0.0"; // keep equal to package.json, a test checks it

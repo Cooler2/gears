@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Questions about a description that the fields and the texts of every language ask.
 
 export const isIdler = (description) => description?.kind === "idlerPulley";

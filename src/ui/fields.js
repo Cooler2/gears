@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Part kinds, form groups and fields of the pulley contract v5.
 //
 // Everything about a field that the contract already defines (limits, defaults,

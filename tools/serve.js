@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Static file server for the local form: the page loads ES modules, the schema and
 // the examples, which browsers refuse to do from file://. Serves the project root.
 //

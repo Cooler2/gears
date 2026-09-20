@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Ready-made variants: files from examples/valid; titles and texts for people are in
 // the locale files. The variants page groups them by the kind written in the file.
 // All but one lie flat on their lower face, ready to print.

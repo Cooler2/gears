@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Camera and geometry helpers for the 3D preview. Pure functions, no WebGL, so
 // the fit and orientation rules are tested in Node. Matrices are column-major
 // Float32Array(16), as WebGL expects; the model's +Z axis points up on screen.

@@ -1,4 +1,4 @@
-// Gears — (c) 2026 Ivan Polyacov, Elastic License 2.0, see LICENSE
+// Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // Rims of the part kinds: the only part of the geometry that depends on `kind`.
 //
 // Everything inside the rim (web, hub, bore) and the flanges outside it are shared.
