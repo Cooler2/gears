@@ -144,6 +144,14 @@ export default {
       label: (description) => isSpokes(description) ? "Сдвиг спиц" : "Сдвиг полотна",
       hint: "От выбранного положения, плюс — вверх. Обычно ноль; полотно не может выходить за низ и верх детали."
     },
+    "/web/hubTaper": {
+      label: "Конус втулки",
+      hint: (description) => `Угол от оси. Втулка расширяется к ${isSpokes(description) ? "спицам" : "полотну"} и переходит в ${isSpokes(description) ? "них" : "него"} без ступеньки; у поднятого полотна это убирает навес под ним. Ноль — цилиндр. Диаметр втулки задан у плоскостей детали.`
+    },
+    "/web/rimTaper": {
+      label: (description) => `Конус ${rimWords(description).bodyOf}`,
+      hint: (description) => `Угол от оси. ${rimWords(description).body === "обод" ? "Обод" : "Венец"} утолщается внутрь к ${isSpokes(description) ? "спицам" : "полотну"}; толщина ${rimWords(description).bodyOf} задана у плоскостей детали. Ноль — цилиндр. Если два конуса не помещаются между втулкой и ${rimWords(description).body === "обод" ? "ободом" : "венцом"}, оба укорачиваются, углы сохраняются.`
+    },
     "/web/count": {
       label: "Число спиц",
       hint: "Спицы расположены равномерно. Две спицы не поддерживаются."
@@ -217,13 +225,13 @@ export default {
     "gear-spokes-60t.json": { title: "60 зубьев, спицы", text: "Модуль 1.5, диаметр 93 мм, шесть спиц у нижнего торца, втулка выступает вверх." },
     "gear-helical-30t.json": { title: "30 зубьев, косые правые", text: "Модуль 1.5, наклон +20°, отверстие 8 мм. Ответная шестерня — с левыми зубьями, −20°." },
     "gear-helical-15t.json": { title: "15 зубьев, косые левые", text: "Пара к 30 зубьям с правыми: модуль 1.5, наклон −20°, вал 5 мм с лыской." },
-    "gear-herringbone-32t.json": { title: "Шеврон, 32 зуба", text: "Модуль 1.5, наклон +30°, ширина 12 мм, отверстие 8 мм. Ответная шестерня — с наклоном −30°." },
+    "gear-herringbone-32t.json": { title: "Шеврон, 32 зуба", text: "Модуль 1.5, наклон +30°, ширина 12 мм, отверстие 8 мм, втулка и венец расширяются к полотну. Ответная шестерня — с наклоном −30°." },
     "gear-herringbone-12t.json": { title: "Шеврон, 12 зубьев без полотна", text: "Пара к 32 зубьям: модуль 1.5, наклон −30°, зубья прямо от втулки, вал 5 мм с лыской." }
   },
 
   // the core returns only codes, paths and numeric details; every sentence a person reads is composed here
   diagnostics: {
-    E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion от 1 до 5.",
+    E_SCHEMA_VERSION: () => "Файл другой версии формата: эта версия генератора понимает schemaVersion от 1 до 6.",
     E_SCHEMA_VALUE: ({ rule, minimum, maximum, expected }) => {
       if (rule === "numberRange") return `Нужно число от ${n(minimum)} до ${n(maximum)}.`;
       if (rule === "integerRange") return `Нужно целое число от ${minimum} до ${maximum}.`;
@@ -312,6 +320,8 @@ export default {
     spokeThickness: "Толщина спиц",
     webThickness: "Толщина полотна",
     hubToRim: (smooth) => `Промежуток между втулкой и ${smooth ? "ободом" : "венцом"}`,
+    hubAtWeb: "Диаметр втулки у полотна",
+    rimInnerAtWeb: (smooth) => `Внутренний диаметр ${smooth ? "обода" : "венца"} у полотна`,
     webFrom: "Полотно по высоте, от",
     hubFrom: "Втулка по высоте, от",
     upTo: "до",

@@ -2,13 +2,14 @@
 import { boreExtents } from "./contours.js";
 import { gearGeometry } from "./involute.js";
 import { HELICES, PART_KINDS, rimFields, rimRadii, rimSizePath, rimSurface } from "./rims.js";
+import { planTapers } from "./taper.js";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "bore", "generation"];
 const OPTIONAL_ROOT_FIELDS = ["generator"]; // the program that wrote the file; not geometry, dropped on normalization
 const FLANGES_FIELDS = ["lower", "upper"];
 const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
-const SOLID_WEB_FIELDS = ["type", "thinning", "alignment", "axialOffset"];
+const SOLID_WEB_FIELDS = ["type", "thinning", "alignment", "axialOffset", "hubTaper", "rimTaper"];
 const WEB_ALIGNMENTS = ["lower", "center", "upper"];
 const SPOKE_WEB_FIELDS = [...SOLID_WEB_FIELDS, "count", "width", "filletRadius"];
 const NO_WEB_FIELDS = ["type"]; // the rim sits on the hub: a pinion, a small pulley on a shaft
@@ -65,6 +66,8 @@ export function validateDescription(original) {
  * mid-plane, the hub extensions from those faces instead of the rim ends.
  * Version 5 renames the spur gear to gear, whose teeth may be helical: an earlier
  * gear gets straight teeth.
+ * Version 6 lets the hub and the rim widen towards the web; an earlier web keeps
+ * them cylindrical.
  */
 export function upgradeDescription(input) {
   let current = input;
@@ -82,6 +85,13 @@ export function upgradeDescription(input) {
     current = replaceKeys(current, {
       schemaVersion: { schemaVersion: 5 },
       ...(gear ? { kind: { kind: "gear" }, rim: { rim: replaceKeys(current.rim, { backlash: { backlash: current.rim.backlash, helix: "none" } }) } } : {})
+    });
+  }
+  if (isRecord(current) && current.schemaVersion === 5) {
+    const placed = isRecord(current.web) && Object.hasOwn(current.web, "axialOffset");
+    current = replaceKeys(current, {
+      schemaVersion: { schemaVersion: 6 },
+      ...(placed ? { web: { web: replaceKeys(current.web, { axialOffset: { axialOffset: current.web.axialOffset, hubTaper: 0, rimTaper: 0 } }) } } : {})
     });
   }
   return current;
@@ -135,6 +145,8 @@ function buildAnchors(input, derived) {
       bore: derived.boreRadius,
       hub: derived.hubRadius,
       rimInner: derived.rimInnerRadius,
+      hubWeb: derived.hubWebRadius,
+      rimInnerWeb: derived.rimInnerWebRadius,
       root: derived.rootRadius,
       outside: derived.outsideRadius,
       pitch: derived.pitchRadius
@@ -197,6 +209,8 @@ function validateStatic(input, diagnostics) {
         numberRange(input.web.thinning, 0, 59, "/web/thinning", diagnostics);
         enumeration(input.web.alignment, WEB_ALIGNMENTS, "/web/alignment", diagnostics);
         numberRange(input.web.axialOffset, -60, 60, "/web/axialOffset", diagnostics);
+        numberRange(input.web.hubTaper, 0, 60, "/web/hubTaper", diagnostics);
+        numberRange(input.web.rimTaper, 0, 60, "/web/rimTaper", diagnostics);
       }
       if (input.web.type === "spokes") {
         integerRange(input.web.count, 3, 12, "/web/count", diagnostics);
@@ -299,11 +313,13 @@ function validateRelations(input, derived, diagnostics) {
     // with no room between hub and rim E_RADIAL_ORDER already speaks for the span;
     // the fillets are then limited by the spoke width alone
     const spanKnown = span >= minimumWebSpan("spokes");
-    if (filletRadius > width / 2 || (spanKnown && 2 * filletRadius > span)) {
+    // spokes join the hub and the rim at the web, where the cones have widened them
+    const webSpan = derived.rimInnerWebRadius - derived.hubWebRadius;
+    if (filletRadius > width / 2 || (spanKnown && 2 * filletRadius > webSpan)) {
       diagnostics.push(diagnostic("E_SPOKE_FILLET", "error", "description", ["/web/width", "/web/filletRadius"],
-        spanKnown ? { maxByWidth: width / 2, maxBySpan: span / 2 } : { maxByWidth: width / 2 }));
+        spanKnown ? { maxByWidth: width / 2, maxBySpan: webSpan / 2 } : { maxByWidth: width / 2 }));
     }
-    const available = 2 * derived.hubRadius * Math.sin(Math.PI / count);
+    const available = 2 * derived.hubWebRadius * Math.sin(Math.PI / count);
     if (width + 2 * filletRadius >= available) {
       diagnostics.push(diagnostic("E_SPOKE_OVERLAP", "error", "description", ["/web/count", "/web/width", "/web/filletRadius", "/hub/outerDiameter"],
         { required: width + 2 * filletRadius, available }));
@@ -372,6 +388,13 @@ function derive(input) {
   const webUpperZ = snapLevel(faceUpperZ - upperCut + axialOffset, levels);
   const hubLowerZ = snapLevel(faceLowerZ - input.hub.lowerExtension, [...levels, webLowerZ, webUpperZ]);
   const hubUpperZ = snapLevel(faceUpperZ + input.hub.upperExtension, [...levels, webLowerZ, webUpperZ]);
+  // the cones leave room for the spoke fillets; without a web there are none
+  const tapers = planTapers({
+    hubRadius, rimInnerRadius, faceLowerZ, faceUpperZ, webLowerZ, webUpperZ,
+    hubTaper: noWeb ? 0 : input.web.hubTaper,
+    rimTaper: noWeb ? 0 : input.web.rimTaper,
+    minimumSpan: input.web.type === "spokes" ? Math.max(minimumWebSpan("spokes"), 2 * input.web.filletRadius) : minimumWebSpan(input.web.type)
+  });
   // a smooth surface is exactly outsideRadius; the tooth profile is measured as built
   const surfaceBound = toothed ? Math.max(...rimSurface(input.kind, input.rim, radii).points.map(([x, y]) => Math.hypot(x, y))) : outsideRadius;
   const radialBound = Math.max(surfaceBound,
@@ -393,6 +416,11 @@ function derive(input) {
     boreOuterRadius: bore.outerRadius,
     boreExtentX: { positive: bore.positiveX, negative: bore.negativeX },
     hubRadius,
+    // radii at the web and the cones that lead to them, see taper.js
+    hubWebRadius: hubRadius + tapers.hub.addition,
+    rimInnerWebRadius: rimInnerRadius - tapers.rim.addition,
+    hubTaper: tapers.hub,
+    rimTaper: tapers.rim,
     faceLowerZ,
     faceUpperZ,
     webThickness,
@@ -423,7 +451,9 @@ function normalize(input) {
     type: input.web.type,
     thinning: input.web.thinning,
     alignment: input.web.alignment,
-    axialOffset: input.web.axialOffset
+    axialOffset: input.web.axialOffset,
+    hubTaper: input.web.hubTaper,
+    rimTaper: input.web.rimTaper
   };
   if (input.web.type === "spokes") Object.assign(web, {
     count: input.web.count,

@@ -188,7 +188,7 @@ test("bore rules keep the axis inside and measure the hub wall at the farthest p
   assert.deepEqual(derived.boreExtentX, { positive: 2.5 * Math.cos(Math.PI / 5), negative: 2.5 }, "an odd polygon has a vertex at −X");
 });
 
-test("version 1 to 4 descriptions are read as version 5", async () => {
+test("version 1 to 5 descriptions are read as version 6", async () => {
   const current = await readJson("../examples/valid/spokes-flanged.json");
   // version 3: the web by thickness and mid-plane, hub extensions from the rim ends (flanges 0.8 and 1.2)
   const { thinning, alignment, axialOffset, ...spokes } = current.web;
@@ -202,8 +202,11 @@ test("version 1 to 4 descriptions are read as version 5", async () => {
   const version2 = { ...structuredClone(version3), schemaVersion: 2, rim };
   const { bore, ...rest } = version2;
   const version1 = { ...rest, schemaVersion: 1, hub: { boreDiameter: bore.diameter, ...version3.hub } };
+  // version 5: no cones, the example has cylinders
+  const { hubTaper, rimTaper, ...version5Web } = current.web;
+  const version5 = { ...structuredClone(current), schemaVersion: 5, web: version5Web };
   const mesh = generatePulley(current).mesh;
-  for (const legacy of [version1, version2, version3]) {
+  for (const legacy of [version1, version2, version3, version5]) {
     const snapshot = structuredClone(legacy);
     const result = generatePulley(legacy);
     assert.deepEqual(legacy, snapshot, "the input is not modified");
@@ -217,7 +220,8 @@ test("version 1 to 4 descriptions are read as version 5", async () => {
   const mixed = { ...structuredClone(current), hub: { ...current.hub, boreDiameter: 5 } };
   assert.ok(validateDescription(mixed).diagnostics.some(({ paths }) => paths.includes("/hub/boreDiameter")));
   assert.ok(validateDescription({ ...current, rim }).diagnostics.some(({ paths }) => paths.includes("/rim/toothedWidth")));
-  assert.ok(validateDescription({ ...current, schemaVersion: 6 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+  assert.ok(validateDescription({ ...current, schemaVersion: 7 }).diagnostics.some(({ code }) => code === "E_SCHEMA_VERSION"));
+  assert.ok(validateDescription({ ...current, web: version5Web }).diagnostics.some(({ paths }) => paths.includes("/web/hubTaper")), "version 6 requires the cones");
   assert.ok(validateDescription({ ...version3, schemaVersion: 4 }).diagnostics.some(({ paths }) => paths.includes("/web/axialThickness")));
 
   // a version 3 web against a face of the part is aligned to it, any other is centred; the levels stay
@@ -744,3 +748,54 @@ function assertHorizontalBoundaryOrientation(mesh, derived) {
     assert.ok(normalZ * expected > 0, `horizontal face ${face / 3} has an inward normal`);
   }
 }
+
+test("the hub and the rim widen towards the web at their angles, shortened when they do not fit", async () => {
+  const base = await readJson("../examples/valid/gear-herringbone-32t.json");
+  const tapered = (web) => validateDescription({ ...base, web: { ...base.web, ...web } });
+  // a 12 mm rim, the web 6 mm thick against the lower face: the cones span the upper 6 mm
+  const { derived } = tapered({ hubTaper: 30, rimTaper: 45 });
+  const addition = 6 * Math.tan(Math.PI / 6);
+  assert.ok(Math.abs(derived.hubWebRadius - (8 + addition)) < 1e-12);
+  assert.ok(Math.abs(derived.rimInnerWebRadius - (derived.rimInnerRadius - 6)) < 1e-12);
+  assert.ok(Math.abs(derived.hubTaper.height - 6) < 1e-12 && Math.abs(derived.rimTaper.height - 6) < 1e-12, "both cones end at the upper face");
+
+  // a centred web: the lower of the two heights sets the additions, the taller side ends in a cylinder
+  const centred = tapered({ alignment: "center", axialOffset: 1, hubTaper: 30, rimTaper: 30 }).derived;
+  assert.ok(Math.abs(centred.hubWebRadius - 8 - 2 * Math.tan(Math.PI / 6)) < 1e-12, "3 − 1 mm below the web");
+
+  // steep cones do not fit: both shrink in proportion and keep 0.5 mm between them
+  const steep = tapered({ hubTaper: 60, rimTaper: 60 }).derived;
+  assert.ok(Math.abs(steep.rimInnerWebRadius - steep.hubWebRadius - 0.5) < 1e-12);
+  assert.ok(Math.abs((steep.hubWebRadius - 8) - (steep.rimInnerRadius - steep.rimInnerWebRadius)) < 1e-12, "equal angles, equal shares");
+  assert.ok(steep.hubTaper.height < 6, "the cone became a chamfer");
+
+  // a web through the whole height and a part without a web have no cones
+  assert.equal(tapered({ thinning: 0, hubTaper: 30, rimTaper: 30 }).derived.hubWebRadius, 8);
+  const noWeb = validateDescription({ ...base, web: { type: "none" } }).derived;
+  assert.equal(noWeb.hubWebRadius, noWeb.hubRadius);
+
+  // the mesh: the widest hub vertex at the web level and the narrowest rim vertex there
+  const result = generatePulley({ ...base, web: { ...base.web, hubTaper: 30, rimTaper: 45 } });
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  const radiiAt = (z) => {
+    const radii = [];
+    for (let index = 0; index < result.mesh.vertices.length; index += 3) {
+      const [x, y, level] = result.mesh.vertices.slice(index, index + 3);
+      if (Math.abs(level - z) < 1e-9) radii.push(Math.hypot(x, y));
+    }
+    return radii;
+  };
+  const web = radiiAt(result.derived.webUpperZ);
+  const face = radiiAt(result.derived.faceUpperZ);
+  const near = (radii, radius) => radii.some((value) => Math.abs(value - radius) < 1e-9);
+  assert.ok(near(web, derived.hubWebRadius) && near(web, derived.rimInnerWebRadius), "the web meets both cones at their web radii");
+  assert.ok(near(face, 8) && near(face, derived.rimInnerRadius) && !near(face, derived.hubWebRadius), "the faces keep the given sizes");
+});
+
+test("a hub cone makes room for spokes that a narrow hub cannot carry", async () => {
+  const input = await readJson("../examples/invalid/spoke-overlap.json");
+  assert.ok(validateDescription(input).diagnostics.some(({ code }) => code === "E_SPOKE_OVERLAP"));
+  const widened = generatePulley({ ...input, web: { ...input.web, hubTaper: 50 } });
+  assert.equal(widened.ok, true, JSON.stringify(widened.diagnostics));
+  assert.equal(widened.verification.connectedComponents, 1);
+});

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "kind": "timingPulley",
   "units": "mm",
   "rim": {
@@ -10,7 +10,7 @@
     "pitch": 2
   },
   "flanges": { "lower": null, "upper": null },
-  "web": { "type": "solid", "thinning": 3, "alignment": "center", "axialOffset": 0 },
+  "web": { "type": "solid", "thinning": 3, "alignment": "center", "axialOffset": 0, "hubTaper": 0, "rimTaper": 0 },
   "hub": {
     "outerDiameter": 8,
     "lowerExtension": 0,

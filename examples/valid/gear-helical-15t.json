@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "kind": "gear",
   "units": "mm",
   "rim": {
@@ -21,7 +21,9 @@
     "type": "solid",
     "thinning": 0,
     "alignment": "lower",
-    "axialOffset": 0
+    "axialOffset": 0,
+    "hubTaper": 0,
+    "rimTaper": 0
   },
   "hub": {
     "outerDiameter": 12,

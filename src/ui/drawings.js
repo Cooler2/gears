@@ -13,6 +13,7 @@
 import { circleSegmentCount } from "../core/contours.js";
 import { buildGearContour, gearGeometry } from "../core/involute.js";
 import { helixTurn } from "../core/rims.js";
+import { taperBreaks, taperedRadius } from "../core/taper.js";
 import { FIELD_BY_PATH, fieldLabel, fieldUnit } from "./fields.js";
 import { escapeHtml, formatNumber, splitSymbol } from "./format.js";
 import { T } from "./locale.js";
@@ -135,15 +136,20 @@ export function renderPlan(model, ctx) {
     if (radius) out.push(part(ctx, "flanges", circlePath(radius), { path: `/flanges/${side}`, extra: "part-beyond" }));
   }
   const rimInner = Math.max(r.rimInner, 0);
+  // the cut goes through the web, where the cones have widened the hub and the rim
+  const rimInnerWeb = Math.max(r.rimInnerWeb, 0);
   const surface = plan.profile ? polygonPath(plan.profile) : circlePath(r.outside);
-  out.push(part(ctx, "rim", surface + (rimInner > 0 ? circlePath(rimInner) : "")));
+  out.push(part(ctx, "rim", surface + (rimInnerWeb > 0 ? circlePath(rimInnerWeb) : "")));
   if (plan.spokes) {
     const outlines = plan.spokes.outlines.map(polygonPath).join("");
     if (outlines) out.push(part(ctx, "web", outlines, { path: "/web/type", extra: plan.spokes.schematic ? "part-schematic" : "" }));
-  } else if (rimInner > r.hub) {
-    out.push(part(ctx, "web", circlePath(rimInner) + circlePath(r.hub), { path: "/web/type" }));
+  } else if (rimInnerWeb > r.hubWeb) {
+    out.push(part(ctx, "web", circlePath(rimInnerWeb) + circlePath(r.hubWeb), { path: "/web/type" }));
   }
-  if (r.hub > r.bore) out.push(part(ctx, "hub", circlePath(r.hub) + polygonPath(plan.bore)));
+  if (r.hubWeb > r.bore) out.push(part(ctx, "hub", circlePath(r.hubWeb) + polygonPath(plan.bore)));
+  // the cones end at the hub and rim sizes, which the dimensions measure
+  const coneEdges = [r.hubWeb > r.hub && r.hub > r.bore ? circlePath(r.hub) : "", rimInnerWeb < rimInner ? circlePath(rimInner) : ""].join("");
+  if (coneEdges) out.push(`<path class="cone-edge" d="${coneEdges}"/>`);
   if (detail) {
     // parts are cut by the detail circle; getBBox ignores clipping, so the app measures the circle instead
     out.splice(0, out.length, `<g class="detail" clip-path="url(#plan-detail)">${out.join("")}</g>`, `<path class="detail-edge" d="${circlePath(detail)}"/>`);
@@ -445,18 +451,26 @@ export function renderSection(model, ctx) {
   const u = Math.max(2 * outer, 1.4 * (top - bottom)) / 19;
   const rimInner = Math.max(r.rimInner, 0);
   const spokes = normalized.web.type === "spokes";
+  /** Points [r, z] of a tapered surface from z0 up to z1, with a corner at every cone end. */
+  const surfaceLine = (base, sign, taper, z0, z1) => [z0, ...taperBreaks(taper, z.webLower, z.webUpper, z0, z1), z1]
+    .map((level) => [taperedRadius(base, sign, taper, z.webLower, z.webUpper, level), level]);
+  const hubLine = (z0, z1) => surfaceLine(r.hub, 1, derived.hubTaper, z0, z1);
+  const rimLine = (z0, z1) => surfaceLine(rimInner, -1, derived.rimTaper, z0, z1).map(([radius, level]) => [Math.max(radius, 0), level]);
 
   const rects = { rim: [], teeth: [], flanges: { lower: [], upper: [] }, web: [], hub: [] };
   for (const side of [1, -1]) {
     const box = (x0, z0, x1, z1) => rectPath(side * x0, z0, side * x1, z1);
+    const outline = (points) => polygonPath(points.map(([radius, level]) => [side * radius, level]));
+    // a ring between a tapered inner line and a straight outer edge at radius x1
+    const ring = (x1, z0, z1) => outline([...rimLine(z0, z1), [x1, z1], [x1, z0]]);
     if (r.root < r.outside) rects.teeth.push(box(r.root, z.rimLower, r.outside, z.rimUpper));
-    rects.rim.push(box(rimInner, z.rimLower, r.root, z.rimUpper));
-    if (z.lowerFlange !== null) rects.flanges.lower.push(box(rimInner, z.lowerFlange, flangeRadius.lower, z.rimLower));
-    if (z.upperFlange !== null) rects.flanges.upper.push(box(rimInner, z.rimUpper, flangeRadius.upper, z.upperFlange));
-    if (rimInner > r.hub) rects.web.push(box(r.hub, z.webLower, rimInner, z.webUpper));
+    rects.rim.push(ring(r.root, z.rimLower, z.rimUpper));
+    if (z.lowerFlange !== null) rects.flanges.lower.push(ring(flangeRadius.lower, z.lowerFlange, z.rimLower));
+    if (z.upperFlange !== null) rects.flanges.upper.push(ring(flangeRadius.upper, z.rimUpper, z.upperFlange));
+    if (r.rimInnerWeb > r.hubWeb) rects.web.push(box(r.hubWeb, z.webLower, r.rimInnerWeb, z.webUpper));
     // the flat, the keyway and a polygon side face +X, so the bore edge differs between the halves
     const boreEdge = Math.max(side > 0 ? derived.boreExtentX.positive : derived.boreExtentX.negative, 0);
-    if (r.hub > boreEdge) rects.hub.push(box(boreEdge, z.lowerHub, r.hub, z.upperHub));
+    if (r.hub > boreEdge) rects.hub.push(outline([[boreEdge, z.lowerHub], ...hubLine(z.lowerHub, z.upperHub), [boreEdge, z.upperHub]]));
   }
 
   const out = [];
@@ -566,9 +580,49 @@ export function renderSection(model, ctx) {
     }));
   }
 
+  if (web.type !== "none") out.push(...taperDimensions(ctx, web, derived, z, u, { top, bottom }));
+
   const width = 2 * outer + 6.5 * u + 7 * u;
   const box = [-outer - 7 * u, -(top + 4.2 * u), width, top - bottom + 7.6 * u];
   return svgRoot(box, u, out.join(""), T.drawings.section, hatchPattern("section-hatch", u));
+}
+
+/**
+ * Cone angles on the right half, where a cone leaves the web: an arc from the
+ * axis direction to the cone line, the label led above the part (below it when
+ * the cones are under the web). The hub label goes left of its leader, the rim
+ * label right, so the two never meet. A cylinder gets its label alone at the
+ * foot of its surface: the field still has a place on the drawing.
+ */
+function taperDimensions(ctx, web, derived, z, u, { top, bottom }) {
+  // the cones are drawn on the upper side unless the web is against the upper face
+  const up = derived.faceUpperZ - z.webUpper > 1e-9;
+  const direction = up ? 1 : -1;
+  const webFace = up ? z.webUpper : z.webLower;
+  const labelLevel = up ? top + 1.2 * u : bottom - 1.2 * u;
+  const out = [];
+  for (const [path, value, taper, radius, outward, anchor] of [
+    ["/web/hubTaper", web.hubTaper, derived.hubTaper, derived.hubWebRadius, -1, "end"],
+    ["/web/rimTaper", web.rimTaper, derived.rimTaper, derived.rimInnerWebRadius, 1, "start"]
+  ]) {
+    const foot = [radius, webFace];
+    const axisLine = [0, direction];
+    // the cone line runs away from the web and towards its base radius
+    const coneLine = unit([outward * taper.slope, direction]);
+    const reach = Math.max(taper.height * Math.hypot(taper.slope, 1), 2 * u);
+    const arcRadius = Math.min(1.6 * u, 0.8 * reach);
+    const arc = Array.from({ length: 9 }, (_, index) => add(foot, mul(unit(add(mul(axisLine, 1 - index / 8), mul(coneLine, index / 8))), arcRadius)));
+    const middle = taper.addition > 0 ? arc[4] : add(foot, mul(axisLine, arcRadius));
+    const labelAt = [middle[0] + outward * 0.6 * u, labelLevel];
+    const lines = taper.addition > 0
+      ? `<path class="dim-ext" d="M${P(foot)}L${P(add(foot, mul(axisLine, arcRadius + 0.6 * u)))}M${P(foot)}L${P(add(foot, mul(coneLine, Math.max(reach, arcRadius + 0.6 * u))))}"/>` +
+        `<path class="dim-line" d="M${arc.map(P).join("L")}"/><path class="dim-hit" d="M${arc.map(P).join("L")}"/>`
+      : "";
+    out.push(wrap(ctx, path, value,
+      lines + `<path class="dim-ext" d="M${P(middle)}L${P(labelAt)}"/>` +
+      labelMarkup(path, value, add(labelAt, [outward * 0.3 * u, 0]), anchor)));
+  }
+  return out;
 }
 
 // --------------------------------------------------------------- chord view

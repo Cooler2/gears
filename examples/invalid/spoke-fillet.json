@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "kind": "timingPulley",
   "units": "mm",
   "rim": {
@@ -14,6 +14,8 @@
     "thinning": 5,
     "alignment": "center",
     "axialOffset": 0,
+    "hubTaper": 0,
+    "rimTaper": 0,
     "count": 6,
     "width": 3,
     "filletRadius": 2

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "kind": "gear",
   "units": "mm",
   "rim": {
@@ -21,6 +21,8 @@
     "thinning": 6,
     "alignment": "lower",
     "axialOffset": 0,
+    "hubTaper": 30,
+    "rimTaper": 30,
     "count": 6,
     "width": 4,
     "filletRadius": 1.5

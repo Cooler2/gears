@@ -12,7 +12,7 @@ import { PRESETS } from "../src/ui/presets.js";
 import { createState, getValue, keepShaft, loadDescription, parseNumber, restoreState, setBoreShape, setFlange, setHelix, setValue, setWebType } from "../src/ui/state.js";
 
 const readJson = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
-const schema = await readJson("../schemas/pulley-v5.schema.json");
+const schema = await readJson("../schemas/pulley-v6.schema.json");
 const exampleNames = async (kind) => (await readdir(new URL(`../examples/${kind}/`, import.meta.url))).filter((name) => name.endsWith(".json")).sort();
 const numeric = (field) => !field.kind;
 
@@ -162,7 +162,7 @@ test("defaults validate and the form state keeps hidden values", () => {
   const spokes = setValue(setWebType(state, "spokes"), "/web/width", 4);
   assert.equal(state.description.web.type, "solid", "updates never mutate the previous state");
   const solid = setWebType(spokes, "solid");
-  assert.deepEqual(Object.keys(solid.description.web).sort(), ["alignment", "axialOffset", "thinning", "type"]);
+  assert.deepEqual(Object.keys(solid.description.web).sort(), ["alignment", "axialOffset", "hubTaper", "rimTaper", "thinning", "type"]);
   assert.equal(validateDescription(solid.description).ok, true, "a solid web carries no spoke fields");
   assert.equal(setWebType(solid, "spokes").description.web.width, 4);
 
@@ -204,7 +204,11 @@ test("a form state saved with a version 1 description is upgraded", () => {
   const legacy = { ...rest, schemaVersion: 1, rim: { ...rim, toothedWidth: width }, web, hub: { boreDiameter: 6, ...description.hub } };
   const saved = { description: legacy, remembered: { spokes: { count: 4, width: 2, filletRadius: 1 }, flanges: createState(schema).remembered.flanges } };
   const restored = restoreState(schema, saved);
-  assert.deepEqual(restored.description, { ...description, bore: { shape: "round", diameter: 6 } });
+  // an old web stays cylindrical, while a new one gets the default cones
+  assert.deepEqual(restored.description, { ...description, web: { ...description.web, hubTaper: 0, rimTaper: 0 }, bore: { shape: "round", diameter: 6 } });
+  const { hubTaper, rimTaper, ...oldPlacement } = createState(schema).remembered.placement;
+  const remembered = restoreState(schema, { ...saved, remembered: { ...saved.remembered, placement: oldPlacement } }).remembered.placement;
+  assert.deepEqual([remembered.hubTaper, remembered.rimTaper], [0, 0], "a placement remembered before version 6 has cylinders");
   assert.equal(restored.remembered.spokes.count, 4);
   assert.equal(restored.remembered.bore.sides, 6);
   assert.equal(restoreState(schema, { description }), null);

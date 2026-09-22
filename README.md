@@ -35,7 +35,8 @@ The workflow: on the Presets page you choose a part kind and a ready-made preset
 | Pulley flange: thickness / extension beyond the tips or the rim surface | 0.4…5 / 0.5…10 mm | 1 / 1 |
 | Web or spokes: thinning / alignment / offset | 0…59 mm / bottom, centre, top / −60…60 mm | 0 / bottom / 0 |
 | Spokes: count / width / fillet radius | 3…12 / 1…20 / 0.5…10 mm | 6 / 2.5 / 1 |
-| Hub outer diameter | 2…100 mm | 10 |
+| Hub and rim cones towards the web, angle from the axis | 0…60° | 30 |
+| Hub outer diameter (at the faces of the part) | 2…100 mm | 10 |
 | Bore: diameter (circumscribed circle for a polygon) | 0.5…50 mm | 5, round |
 | Polygonal bore: side count | 3…12 | 6 |
 | D-shaped bore: size across the flat | 0.3…50 mm, over `d/2` and under `d` | 4.5 |
@@ -43,9 +44,9 @@ The workflow: on the Presets page you choose a part kind and a ready-made preset
 | Hub extensions below and above the faces of the part | −5…50 mm | 0 |
 | Chord tolerance | 0.01…0.25 mm | 0.05 |
 
-Besides the ranges, related constraints apply: tooth thickness after thinning and the space between teeth, the hub wall at its thinnest point, room between the hub and the rim, a web at least 1 mm thick, the web within the part, the hub along the whole height of the web, fillets and the spoke layout. A violation is explained next to the field. A gear warns about root undercut at small tooth counts and about pointed teeth. The sign of the helix angle sets the hand: plus is right-hand, minus is left-hand; the two gears of a pair have opposite signs.
+Besides the ranges, related constraints apply: tooth thickness after thinning and the space between teeth, the hub wall at its thinnest point, room between the hub and the rim, a web at least 1 mm thick, the web within the part, the hub along the whole height of the web, fillets and the spoke layout. A violation is explained next to the field. A gear warns about root undercut at small tooth counts and about pointed teeth. The sign of the helix angle sets the hand: plus is right-hand, minus is left-hand; the two gears of a pair have opposite signs. Cones that do not fit between the hub and the rim at the web get shorter and keep their angles.
 
-The description format is `schemaVersion: 5`: the `kind` field (`timingPulley`, `idlerPulley` or `gear`) selects the rim. The web and the hub are measured from the faces of the part — the outer faces of the flanges, or the rim ends without a flange. By default the web is aligned to the bottom, and the part lies on the bed on its flat base. Files of earlier versions open and read with the same geometry and are saved as version 5. The full specification is [`docs/contract.md`](docs/contract.md), geometry and assumptions are in [`docs/geometry.md`](docs/geometry.md), the schema is [`schemas/pulley-v5.schema.json`](schemas/pulley-v5.schema.json); the documents are in Russian.
+The description format is `schemaVersion: 6`: the `kind` field (`timingPulley`, `idlerPulley` or `gear`) selects the rim. The web and the hub are measured from the faces of the part — the outer faces of the flanges, or the rim ends without a flange. By default the web is aligned to the bottom, and the part lies on the bed on its flat base. Files of earlier versions open and read with the same geometry and are saved as version 6. The full specification is [`docs/contract.md`](docs/contract.md), geometry and assumptions are in [`docs/geometry.md`](docs/geometry.md), the schema is [`schemas/pulley-v6.schema.json`](schemas/pulley-v6.schema.json); the documents are in Russian.
 
 ## Command line
 

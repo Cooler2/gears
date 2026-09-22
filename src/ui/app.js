@@ -43,7 +43,7 @@ const el = {
 let schema, presets;
 try {
   // relative to this module rather than the page: the published page sits at the site root
-  schema = await fetchJson(new URL("../../schemas/pulley-v5.schema.json", import.meta.url));
+  schema = await fetchJson(new URL("../../schemas/pulley-v6.schema.json", import.meta.url));
   presets = await Promise.all(PRESETS.map(async (preset) => ({ ...preset, description: await fetchJson(new URL(`../../examples/valid/${preset.file}`, import.meta.url)) })));
 } catch (error) {
   $("#boot").className = "notice notice-error";
@@ -287,6 +287,9 @@ function computedMarkup() {
     flanges: [[S.lowerFlange, derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], [S.upperFlange, derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], [S.height, derived.bounds.max[2] - derived.bounds.min[2]]],
     web: model.normalized.web.type === "none" ? [] : [[model.normalized.web.type === "spokes" ? S.spokeThickness : S.webThickness, derived.webThickness],
       [S.hubToRim(derived.pitchRadius === null), anchors.radii.rimInner - anchors.radii.hub],
+      // the cones as built: shorter than asked when they do not fit
+      [S.hubAtWeb, derived.hubTaper.addition > 0 ? 2 * derived.hubWebRadius : null],
+      [S.rimInnerAtWeb(derived.pitchRadius === null), derived.rimTaper.addition > 0 ? 2 * derived.rimInnerWebRadius : null],
       [S.webFrom, derived.webLowerZ], [S.upTo, derived.webUpperZ]],
     hub: [[S.hubWall, derived.hubRadius - derived.boreOuterRadius], [S.hubFrom, derived.hubLowerZ], [S.upTo, derived.hubUpperZ]],
     bore: boreRows(model),

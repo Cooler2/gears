@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gears.local/schemas/pulley-v5.schema.json",
-  "title": "Gears pulley description, version 5",
+  "$id": "https://gears.local/schemas/pulley-v6.schema.json",
+  "title": "Gears pulley description, version 6",
   "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley or an involute gear with straight, helical or herringbone teeth. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
@@ -18,8 +18,8 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 5,
-      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only, version 3 added the idler pulley and the spur gear but placed the web by thickness and mid-plane and measured hub extensions from the rim ends; readers upgrade them. Version 4 placed the web and the hub against the faces of the part. Version 5 renames spurGear to gear and adds helical teeth; a version 4 gear gets rim.helix \"none\"."
+      "const": 6,
+      "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only, version 3 added the idler pulley and the spur gear but placed the web by thickness and mid-plane and measured hub extensions from the rim ends; readers upgrade them. Version 4 placed the web and the hub against the faces of the part. Version 5 renames spurGear to gear and adds helical teeth; a version 4 gear gets rim.helix \"none\". Version 6 adds web.hubTaper and web.rimTaper; a version 5 web gets 0 for both, a cylindrical hub and rim."
     },
     "kind": {
       "enum": ["timingPulley", "idlerPulley", "gear"],
@@ -262,13 +262,27 @@
           "maximum": 60,
           "default": 0,
           "description": "Shift of the web from its aligned position; positive is toward the upper side. The web stays between the faces of the part."
+        },
+        "hubTaper": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60,
+          "default": 30,
+          "description": "Angle from the axis at which the hub widens towards the web, degrees; 0 keeps it cylindrical. hub.outerDiameter is the size at the faces of the part. The widening is the lower height between the web and a face times the tangent of the angle; when the hub and rim cones leave too little room between them at the web, both shrink in proportion and the angle stays."
+        },
+        "rimTaper": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60,
+          "default": 30,
+          "description": "Angle from the axis at which the rim thickens inward towards the web, degrees; 0 keeps its inner surface cylindrical. rim.radialThickness is the thickness at the faces of the part."
         }
       }
     },
     "solidWeb": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "thinning", "alignment", "axialOffset"],
+      "required": ["type", "thinning", "alignment", "axialOffset", "hubTaper", "rimTaper"],
       "properties": {
         "type": {
           "const": "solid",
@@ -276,7 +290,9 @@
         },
         "thinning": { "$ref": "#/$defs/webPlacement/properties/thinning" },
         "alignment": { "$ref": "#/$defs/webPlacement/properties/alignment" },
-        "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" }
+        "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" },
+        "hubTaper": { "$ref": "#/$defs/webPlacement/properties/hubTaper" },
+        "rimTaper": { "$ref": "#/$defs/webPlacement/properties/rimTaper" }
       }
     },
     "noWeb": {
@@ -298,6 +314,8 @@
         "thinning",
         "alignment",
         "axialOffset",
+        "hubTaper",
+        "rimTaper",
         "count",
         "width",
         "filletRadius"
@@ -310,6 +328,8 @@
         "thinning": { "$ref": "#/$defs/webPlacement/properties/thinning" },
         "alignment": { "$ref": "#/$defs/webPlacement/properties/alignment" },
         "axialOffset": { "$ref": "#/$defs/webPlacement/properties/axialOffset" },
+        "hubTaper": { "$ref": "#/$defs/webPlacement/properties/hubTaper" },
+        "rimTaper": { "$ref": "#/$defs/webPlacement/properties/rimTaper" },
         "count": {
           "type": "integer",
           "minimum": 3,

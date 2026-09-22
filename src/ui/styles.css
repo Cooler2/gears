@@ -713,6 +713,13 @@ figcaption {
 }
 
 
+.cone-edge {
+  stroke: var(--ink);
+  stroke-width: 0.7px;
+  fill: none;
+  pointer-events: none;
+}
+
 .mid-plane {
   stroke: var(--ink);
   stroke-width: 1px;

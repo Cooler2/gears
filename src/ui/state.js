@@ -9,7 +9,7 @@
 
 import { upgradeDescription } from "../core/parameters.js";
 
-const WEB_PLACEMENT = ["thinning", "alignment", "axialOffset"];
+const WEB_PLACEMENT = ["thinning", "alignment", "axialOffset", "hubTaper", "rimTaper"];
 const BORE_EXTRAS = { round: [], polygon: ["sides"], dFlat: ["flatDistance"], keyed: ["keyWidth", "keyDepth"] };
 
 export function defaultDescription(schema, kind = "timingPulley") {
@@ -146,7 +146,13 @@ export function restoreState(schema, saved) {
   const defaults = createState(schema).remembered;
   return {
     description: upgradeDescription(saved.description),
-    remembered: { ...defaults, ...saved.remembered, bore: { ...defaults.bore, ...saved.remembered.bore } }
+    remembered: {
+      ...defaults,
+      ...saved.remembered,
+      // a placement remembered before version 6 has no cones: they stay cylindrical, as its web was
+      placement: saved.remembered.placement ? { hubTaper: 0, rimTaper: 0, ...saved.remembered.placement } : defaults.placement,
+      bore: { ...defaults.bore, ...saved.remembered.bore }
+    }
   };
 }
 

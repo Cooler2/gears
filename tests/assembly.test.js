@@ -28,15 +28,22 @@ const FLANGE_VARIANTS = {
 };
 const SPOKES = { type: "spokes", count: 6, width: 3, filletRadius: 1 };
 // the rim width is 9 in the base example and the flanges add up to 2, so the web is 2…11 thick;
-// an aligned or full web shares its planes with the flanges, the hub or the rim ends
+// an aligned or full web shares its planes with the flanges, the hub or the rim ends;
+// the tapered ones reach the faces, stop before a taller side or, at 60°, get shortened
+const CYLINDERS = { hubTaper: 0, rimTaper: 0 };
 const WEB_VARIANTS = {
-  solidFull: { type: "solid", thinning: 0, alignment: "lower", axialOffset: 0 },
-  solidThin: { type: "solid", thinning: 7, alignment: "center", axialOffset: 0.5 },
-  solidAtLower: { type: "solid", thinning: 5, alignment: "lower", axialOffset: 0 },
-  solidShifted: { type: "solid", thinning: 6, alignment: "lower", axialOffset: 0.8 },
-  spokesCentered: { ...SPOKES, thinning: 5, alignment: "center", axialOffset: 0 },
-  spokesAtUpper: { ...SPOKES, thinning: 5, alignment: "upper", axialOffset: 0 },
-  spokesFull: { ...SPOKES, thinning: 0, alignment: "center", axialOffset: 0 },
+  solidFull: { type: "solid", thinning: 0, alignment: "lower", axialOffset: 0, ...CYLINDERS },
+  solidThin: { type: "solid", thinning: 7, alignment: "center", axialOffset: 0.5, ...CYLINDERS },
+  solidAtLower: { type: "solid", thinning: 5, alignment: "lower", axialOffset: 0, ...CYLINDERS },
+  solidShifted: { type: "solid", thinning: 6, alignment: "lower", axialOffset: 0.8, ...CYLINDERS },
+  spokesCentered: { ...SPOKES, thinning: 5, alignment: "center", axialOffset: 0, ...CYLINDERS },
+  spokesAtUpper: { ...SPOKES, thinning: 5, alignment: "upper", axialOffset: 0, ...CYLINDERS },
+  spokesFull: { ...SPOKES, thinning: 0, alignment: "center", axialOffset: 0, ...CYLINDERS },
+  taperedAtLower: { type: "solid", thinning: 5, alignment: "lower", axialOffset: 0, hubTaper: 30, rimTaper: 30 },
+  taperedThin: { type: "solid", thinning: 7, alignment: "center", axialOffset: 0.5, hubTaper: 45, rimTaper: 20 },
+  taperedHubOnly: { type: "solid", thinning: 6, alignment: "upper", axialOffset: -0.8, hubTaper: 35, rimTaper: 0 },
+  taperedShortened: { type: "solid", thinning: 7, alignment: "center", axialOffset: 0, hubTaper: 60, rimTaper: 60 },
+  taperedSpokes: { ...SPOKES, thinning: 5, alignment: "center", axialOffset: 0, hubTaper: 35, rimTaper: 20 },
   none: { type: "none" }
 };
 const HUB_VARIANTS = [[0, 0], [2, 0], [0, 3], [2, 3]];
@@ -337,21 +344,51 @@ function insideBore(bore, x, y, margin) {
 }
 
 /** Volume of the stacked prisms, from shoelace areas of the same discretised contours. */
+/**
+ * Volume of a part with a solid web or without one, slice by slice. A tapered
+ * surface is a stack of circles with one vertex count, similar to each other, so
+ * the area of a slice is quadratic in z between the cone ends and Simpson's rule
+ * over each piece is exact.
+ */
 function expectedSolidWebVolume(input, derived) {
   const error = input.generation.maxChordError;
   const surface = rimSurface(input.kind, input.rim, { outside: derived.outsideRadius }, error);
-  const circleArea = (radius, marks = []) => polygonArea(buildMarkedCircle(radius, circleSegmentCount(radius, error), marks).points);
+  const circleArea = (radius, marks = [], segments = circleSegmentCount(radius, error)) => polygonArea(buildMarkedCircle(radius, segments, marks).points);
   const corners = buildBoreContour(input.bore, error).corners;
   // without a web the rim reaches the hub, and the hub loop carries the rim marks too
   const noWeb = input.web.type === "none";
-  const hub = circleArea(derived.hubRadius, noWeb ? [...corners, ...surface.marks] : corners);
-  const rimInner = noWeb ? hub : circleArea(derived.rimInnerRadius, surface.marks);
-  let volume = (polygonArea(surface.points) - rimInner) * input.rim.width;
+  const { webLowerZ, webUpperZ, hubRadius, rimInnerRadius, hubWebRadius, rimInnerWebRadius } = derived;
+  const hubMarks = noWeb ? [...corners, ...surface.marks] : corners;
+  const hubSegments = circleSegmentCount(hubWebRadius, error);
+  const rimSegments = circleSegmentCount(noWeb ? hubWebRadius : rimInnerRadius, error);
+  // the radius leaves its web value at the taper angle and stops at the base radius
+  const radiusAt = (base, web, angle, z) => {
+    const distance = Math.max(webLowerZ - z, z - webUpperZ, 0);
+    const change = Math.max(Math.abs(web - base) - distance * Math.tan(angle * Math.PI / 180), 0);
+    return base + Math.sign(web - base) * change;
+  };
+  const hubArea = (z) => circleArea(radiusAt(hubRadius, hubWebRadius, input.web.hubTaper ?? 0, z), hubMarks, hubSegments);
+  const rimInnerArea = noWeb ? hubArea : (z) => circleArea(radiusAt(rimInnerRadius, rimInnerWebRadius, input.web.rimTaper, z), surface.marks, rimSegments);
+  const coneEnds = [hubWebRadius - hubRadius, rimInnerRadius - rimInnerWebRadius].flatMap((addition, index) => {
+    const angle = [input.web.hubTaper, input.web.rimTaper][index];
+    return addition > 0 ? [webLowerZ - addition / Math.tan(angle * Math.PI / 180), webUpperZ + addition / Math.tan(angle * Math.PI / 180)] : [];
+  });
+  const integrate = (area, z0, z1) => {
+    const levels = [z0, ...[webLowerZ, webUpperZ, ...coneEnds].filter((z) => z > z0 && z < z1).sort((a, b) => a - b), z1];
+    let sum = 0;
+    for (let index = 1; index < levels.length; index += 1) {
+      const [a, b] = [levels[index - 1], levels[index]];
+      sum += (b - a) / 6 * (area(a) + 4 * area((a + b) / 2) + area(b));
+    }
+    return sum;
+  };
+  const halfWidth = input.rim.width / 2;
   const bore = polygonArea(buildBoreContour(input.bore, error).points);
-  volume += (hub - bore) * (derived.hubUpperZ - derived.hubLowerZ);
-  volume += (rimInner - hub) * (derived.webUpperZ - derived.webLowerZ);
-  for (const flange of [input.flanges.lower, input.flanges.upper]) {
-    if (flange) volume += (circleArea(derived.outsideRadius + flange.radialExtension, surface.marks) - rimInner) * flange.axialThickness;
+  let volume = polygonArea(surface.points) * input.rim.width - integrate(rimInnerArea, -halfWidth, halfWidth);
+  volume += integrate(hubArea, derived.hubLowerZ, derived.hubUpperZ) - bore * (derived.hubUpperZ - derived.hubLowerZ);
+  volume += integrate(rimInnerArea, webLowerZ, webUpperZ) - integrate(hubArea, webLowerZ, webUpperZ);
+  for (const [flange, z0, z1] of [[input.flanges.lower, derived.faceLowerZ, -halfWidth], [input.flanges.upper, halfWidth, derived.faceUpperZ]]) {
+    if (flange) volume += circleArea(derived.outsideRadius + flange.radialExtension, surface.marks) * flange.axialThickness - integrate(rimInnerArea, z0, z1);
   }
   return volume;
 }

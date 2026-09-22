@@ -136,6 +136,14 @@ export default {
       label: (description) => isSpokes(description) ? "Spoke offset" : "Web offset",
       hint: "From the chosen position, plus is up. Usually zero; the web cannot go beyond the bottom and the top of the part."
     },
+    "/web/hubTaper": {
+      label: "Hub cone angle",
+      hint: (description) => `From the axis. The hub widens towards the ${isSpokes(description) ? "spokes" : "web"} and meets it without a step; under a raised web this removes the overhang. Zero is a cylinder. The hub diameter is the size at the faces of the part.`
+    },
+    "/web/rimTaper": {
+      label: (description) => isGear(description) ? "Gear rim cone angle" : "Rim cone angle",
+      hint: (description) => `From the axis. The ${isGear(description) ? "gear rim" : "rim"} thickens inward towards the ${isSpokes(description) ? "spokes" : "web"}; its thickness is the size at the faces of the part. Zero is a cylinder. When the two cones do not fit between the hub and the ${isGear(description) ? "gear rim" : "rim"}, both get shorter and keep their angles.`
+    },
     "/web/count": {
       label: "Number of spokes",
       hint: "The spokes are evenly spaced. Two spokes are not supported."
@@ -209,13 +217,13 @@ export default {
     "gear-spokes-60t.json": { title: "60 teeth, spokes", text: "Module 1.5, 93 mm diameter, six spokes at the lower end, the hub extends up." },
     "gear-helical-30t.json": { title: "30 teeth, helical right", text: "Module 1.5, helix +20°, 8 mm bore. The mating gear has left-hand teeth, −20°." },
     "gear-helical-15t.json": { title: "15 teeth, helical left", text: "Pairs with the right-hand 30 teeth: module 1.5, helix −20°, 5 mm D-shaft." },
-    "gear-herringbone-32t.json": { title: "Herringbone, 32 teeth", text: "Module 1.5, helix +30°, 12 mm wide, 8 mm bore. The mating gear has a −30° helix." },
+    "gear-herringbone-32t.json": { title: "Herringbone, 32 teeth", text: "Module 1.5, helix +30°, 12 mm wide, 8 mm bore, the hub and the rim widen towards the web. The mating gear has a −30° helix." },
     "gear-herringbone-12t.json": { title: "Herringbone, 12 teeth, no web", text: "Pairs with the 32 teeth: module 1.5, helix −30°, teeth right on the hub, 5 mm D-shaft." }
   },
 
   // the core returns only codes, paths and numeric details; every sentence a person reads is composed here
   diagnostics: {
-    E_SCHEMA_VERSION: () => "The file has another format version: this version of the generator reads schemaVersion 1 to 5.",
+    E_SCHEMA_VERSION: () => "The file has another format version: this version of the generator reads schemaVersion 1 to 6.",
     E_SCHEMA_VALUE: ({ rule, minimum, maximum, expected }) => {
       if (rule === "numberRange") return `A number from ${n(minimum)} to ${n(maximum)} is needed.`;
       if (rule === "integerRange") return `A whole number from ${minimum} to ${maximum} is needed.`;
@@ -304,6 +312,8 @@ export default {
     spokeThickness: "Spoke thickness",
     webThickness: "Web thickness",
     hubToRim: (smooth) => `Gap between the hub and the ${smooth ? "rim" : "gear rim"}`,
+    hubAtWeb: "Hub diameter at the web",
+    rimInnerAtWeb: (smooth) => `${smooth ? "Rim" : "Gear rim"} inner diameter at the web`,
     webFrom: "Web in height, from",
     hubFrom: "Hub in height, from",
     upTo: "to",

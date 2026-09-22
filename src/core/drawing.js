@@ -33,6 +33,9 @@ export function buildPlanView(normalized, derived) {
       bore: derived.boreRadius,
       hub: derived.hubRadius,
       rimInner: derived.rimInnerRadius,
+      // at the web, where the cones have widened the hub and the rim
+      hubWeb: derived.hubWebRadius,
+      rimInnerWeb: derived.rimInnerWebRadius,
       root: derived.rootRadius,
       outside: derived.outsideRadius,
       pitch: derived.pitchRadius
@@ -46,8 +49,8 @@ export function buildPlanView(normalized, derived) {
 }
 
 function spokeOutlines(web, derived) {
-  const hubRadius = derived.hubRadius;
-  const rimRadius = derived.rimInnerRadius;
+  const hubRadius = derived.hubWebRadius;
+  const rimRadius = derived.rimInnerWebRadius;
   const layout = layoutSpokes({ ...web, hubRadius, rimRadius, maxChordError: Math.min(DRAWING_CHORD_ERROR, web.filletRadius / 4) });
   const fits = web.filletRadius <= web.width / 2 && 2 * web.filletRadius <= rimRadius - hubRadius;
   if (fits && [layout.hubTangentAngle, layout.rimTangentAngle].every(Number.isFinite)) {

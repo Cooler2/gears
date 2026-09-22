@@ -1,5 +1,5 @@
 // Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
-// Part kinds, form groups and fields of the pulley contract v5.
+// Part kinds, form groups and fields of the pulley contract v6.
 //
 // Everything about a field that the contract already defines (limits, defaults,
 // integer or not) is read from the JSON Schema through `schema`; this file adds
@@ -121,6 +121,14 @@ export const FIELDS = [
   {
     path: "/web/axialOffset", group: "web", schema: ["webPlacement", "axialOffset"], applies: hasWeb,
     symbol: "Δz", unit: "mm"
+  },
+  {
+    path: "/web/hubTaper", group: "web", schema: ["webPlacement", "hubTaper"], applies: hasWeb,
+    symbol: "γ_h", unit: "deg"
+  },
+  {
+    path: "/web/rimTaper", group: "web", schema: ["webPlacement", "rimTaper"], applies: hasWeb,
+    symbol: "γ_r", unit: "deg"
   },
   {
     path: "/web/count", group: "web", schema: ["spokeWeb", "count"], applies: isSpokes,
