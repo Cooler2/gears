@@ -136,6 +136,7 @@ test("cross-field invalid examples return their documented diagnostics", async (
     "spoke-fillet.json": "E_SPOKE_FILLET",
     "idler-no-interior.json": "E_RIM_NO_INTERIOR",
     "gear-thin-tooth.json": "E_GEAR_TOOTH_THIN",
+    "bevel-too-wide.json": "E_BEVEL_WIDTH",
     "gear-flange.json": "E_SCHEMA_VALUE",
     "schema-extra-field.json": "E_SCHEMA_VALUE"
   };
@@ -496,6 +497,85 @@ test("a spur gear has involute teeth of the standard rack sizes", async () => {
   assert.deepEqual(flanged.map(({ paths }) => paths[0]), ["/flanges/lower"]);
 });
 
+test("bevel gear teeth run to the apex of the pitch cone and have the sizes of the large end", async () => {
+  const input = await readJson("../examples/valid/bevel-20t.json");
+  const result = generatePulley(input);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  const { rim } = input;
+  const { derived } = result;
+  const cone = Math.atan(rim.toothCount / rim.mateToothCount); // at a right angle tan δ = N/N₂
+  const pitch = rim.module * rim.toothCount / 2;
+  assert.ok(Math.abs(derived.pitchConeAngle - cone * 180 / Math.PI) < 1e-9);
+  assert.ok(Math.abs(derived.pitchConeAngle + derived.mateConeAngle - 90) < 1e-9, "the cones of a pair add up to the shaft angle");
+  assert.ok(Math.abs(derived.coneDistance - pitch / Math.sin(cone)) < 1e-9);
+  assert.equal(derived.pitch, Math.PI * rim.module);
+  assert.equal(derived.virtualToothCount, rim.toothCount / Math.cos(cone));
+  // the lower face passes through the tip circle of the large end, the apex is above it
+  const addendum = rim.module * (1 + rim.profileShift);
+  assert.ok(Math.abs(derived.outsideRadius - (pitch + addendum * Math.cos(cone))) < 1e-9);
+  assert.ok(Math.abs(derived.apexZ - derived.faceLowerZ - (pitch / Math.tan(cone) - addendum * Math.sin(cone))) < 1e-9);
+  // every point of the lower outline lies on a straight line through the apex with its copy in the upper face
+  const surface = rimSurface(input.kind, rim, { outside: derived.outsideRadius }, input.generation.maxChordError);
+  assert.deepEqual(surface.sections.map(({ z }) => z), [-rim.width / 2, rim.width / 2]);
+  const { scale } = surface.sections[1];
+  assert.equal(scale, derived.endScale);
+  assert.ok(Math.abs((1 - scale) * (derived.apexZ + rim.width / 2) - rim.width) < 1e-9, "the tooth lines meet at the apex");
+  assert.ok(Math.abs(derived.rootRadius - Math.min(...surface.points.map((point) => Math.hypot(...point))) * scale) < 1e-9);
+  assert.equal(derived.rimInnerRadius, derived.hubRadius, "without a web the rim reaches the hub");
+  // the upper face of the mesh is the lower outline scaled by s
+  const { vertices } = result.mesh;
+  let upper = 0;
+  for (let index = 0; index < vertices.length; index += 3) {
+    if (vertices[index + 2] === rim.width / 2) upper = Math.max(upper, Math.hypot(vertices[index], vertices[index + 1]));
+  }
+  assert.ok(Math.abs(upper - derived.outsideRadius * scale) < 1e-9);
+  assert.equal(result.verification.connectedComponents, 1);
+});
+
+test("bevel rules limit the cone angle and the face width, and undercut follows the virtual gear", async () => {
+  const base = await readJson("../examples/valid/bevel-miter-16t.json");
+  const codes = (change) => {
+    const input = structuredClone(base);
+    Object.assign(input.rim, change);
+    return validateDescription(input).diagnostics.map(({ code }) => code);
+  };
+  assert.deepEqual(codes({}), []);
+  // tan δ = sin Σ/(N₂/N + cos Σ): 16 teeth for 6 give 69.4° at 90°, 83.1° at 105°, past 90° at 140°
+  assert.ok(!codes({ mateToothCount: 6, width: 2 }).includes("E_BEVEL_CONE"));
+  assert.ok(codes({ mateToothCount: 6, shaftAngle: 105, width: 2 }).includes("E_BEVEL_CONE"));
+  assert.ok(codes({ mateToothCount: 6, shaftAngle: 140, width: 2 }).includes("E_BEVEL_CONE"));
+  // the small end shrinks with the width: a thinner hub keeps under its roots
+  const wide = validateDescription({ ...base, hub: { ...base.hub, outerDiameter: 8 }, rim: { ...base.rim, width: 4.5 } });
+  assert.deepEqual(wide.diagnostics.map(({ code }) => code), ["W_BEVEL_WIDTH"]);
+  // a third of the cone distance along the cone is a third of R_e cos δ along the axis
+  assert.ok(Math.abs(wide.diagnostics[0].details.usual - wide.derived.coneDistance * Math.cos(Math.PI / 4) / 3) < 1e-9);
+  assert.ok(codes({ width: 6 }).includes("E_BEVEL_WIDTH"));
+  // the miter gear has 16/cos 45° = 22.6 virtual teeth: no undercut; a 16 tooth pinion for 60 has 16.5
+  assert.ok(!codes({}).includes("W_GEAR_UNDERCUT"));
+  const pinion = validateDescription({ ...base, rim: { ...base.rim, mateToothCount: 60, width: 3 } });
+  const undercut = pinion.diagnostics.find(({ code }) => code === "W_GEAR_UNDERCUT");
+  assert.ok(undercut, JSON.stringify(pinion.diagnostics));
+  assert.equal(undercut.details.minimum, Math.round(2 / Math.sin(20 * Math.PI / 180) ** 2 * Math.cos(Math.atan(16 / 60))));
+});
+
+test("a bevel pair meshes through a pitch without interference and collides out of phase", async () => {
+  const [small, large] = await Promise.all(["bevel-20t.json", "bevel-30t.json"].map((name) => readJson(`../examples/valid/${name}`)));
+  // no thinning: the teeth of the pair touch
+  small.rim.backlash = large.rim.backlash = 0;
+  const [first, second] = [small, large].map((input) => generatePulley(input));
+  const turned = (result, angle, place) => triangles(result).map((triangle) => triangle.map(([x, y, z]) => place([
+    x * Math.cos(angle) - y * Math.sin(angle), x * Math.sin(angle) + y * Math.cos(angle), z - result.derived.apexZ])));
+  // common apex at the origin; the second axis along −X: a tooth of the first gear at +X faces a space of the second
+  const interfering = (firstTurn, secondTurn) => {
+    const one = turned(first, firstTurn, (point) => point);
+    const two = turned(second, secondTurn, ([x, y, z]) => [-z, y, x]);
+    return surfaceSamples(two).filter((point) => insideMesh(point, one)).length + surfaceSamples(one).filter((point) => insideMesh(point, two)).length;
+  };
+  const degree = Math.PI / 180;
+  for (const turn of [0, 5, 11, 18]) assert.equal(interfering(turn * degree, -turn * degree * 20 / 30), 0, `turned by ${turn}°`);
+  assert.ok(interfering(0, 0.5 * degree) > 0, "the teeth touch: half a degree more collides");
+});
+
 test("solid webs need 0.5 mm of radial span, spokes keep 1 mm", async () => {
   const solid = await readJson("../examples/valid/trial-20t.json");
   const rimInnerRadius = 20 / Math.PI - 0.254 - 0.75 - solid.rim.radialThickness;
@@ -632,6 +712,7 @@ test("every valid example builds a closed solid of the expected size", async () 
     const result = generatePulley(input);
     const toothed = input.kind === "timingPulley";
     const gear = input.kind === "gear";
+    const bevel = input.kind === "bevelGear";
     const helical = gear && input.rim.helix !== "none";
     assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
     assert.deepEqual(result.verification.errors, [], name);
@@ -641,7 +722,12 @@ test("every valid example builds a closed solid of the expected size", async () 
     const { rim, flanges, hub } = input;
     // a helical gear has the normal module: its pitch circle is larger by 1/cos β, the tooth height is the same
     const pitchRadius = gear ? rim.module * rim.toothCount / 2 / (helical ? Math.cos(rim.helixAngle * Math.PI / 180) : 1) : null;
-    const outsideRadius = toothed ? rim.toothCount / Math.PI - 0.254 : gear ? pitchRadius + rim.module * (1 + rim.profileShift) : rim.outerDiameter / 2;
+    // a bevel gear stands on the tip circle of its large end: the addendum is laid along the back cone, at δ to the lower face
+    const cone = bevel ? Math.atan2(Math.sin(rim.shaftAngle * Math.PI / 180), rim.mateToothCount / rim.toothCount + Math.cos(rim.shaftAngle * Math.PI / 180)) : 0;
+    const outsideRadius = toothed ? rim.toothCount / Math.PI - 0.254
+      : gear ? pitchRadius + rim.module * (1 + rim.profileShift)
+      : bevel ? rim.module * rim.toothCount / 2 + rim.module * (1 + rim.profileShift) * Math.cos(cone)
+      : rim.outerDiameter / 2;
     // a smooth circle need not have a vertex on the X axis: it may fall short by the chord tolerance
     const tolerance = toothed ? 1e-9 : input.generation.maxChordError;
     const flangeRadii = [flanges.lower, flanges.upper].filter(Boolean).map((flange) => outsideRadius + flange.radialExtension);
@@ -652,7 +738,7 @@ test("every valid example builds a closed solid of the expected size", async () 
     const { min, max } = result.mesh.bounds;
     // a gear has a tooth tip on +Y at the mid-plane, not necessarily on the X axis; helical tips turn away from it
     if (helical) assert.ok(Math.abs(farthestRadius(result.mesh) - radius) < 1e-9, `${name}: radius ${farthestRadius(result.mesh)} vs ${radius}`);
-    else if (gear) assert.ok(Math.abs(max[1] - radius) < 1e-9 && max[0] <= radius && -min[0] <= radius, `${name}: radius ${max[1]} vs ${radius}`);
+    else if (gear || bevel) assert.ok(Math.abs(max[1] - radius) < 1e-9 && max[0] <= radius && -min[0] <= radius, `${name}: radius ${max[1]} vs ${radius}`);
     else assert.ok(Math.abs(max[0] - radius) < tolerance && Math.abs(min[0] + radius) < tolerance, `${name}: radius ${max[0]} vs ${radius}`);
     assert.ok(Math.abs(min[2] - bottom) < 1e-12 && Math.abs(max[2] - top) < 1e-12, `${name}: height`);
   }
@@ -799,3 +885,38 @@ test("a hub cone makes room for spokes that a narrow hub cannot carry", async ()
   assert.equal(widened.ok, true, JSON.stringify(widened.diagnostics));
   assert.equal(widened.verification.connectedComponents, 1);
 });
+
+function triangles({ mesh: { vertices, indices } }) {
+  const point = (index) => [vertices[3 * index], vertices[3 * index + 1], vertices[3 * index + 2]];
+  return Array.from({ length: indices.length / 3 }, (_, face) => [point(indices[3 * face]), point(indices[3 * face + 1]), point(indices[3 * face + 2])]);
+}
+
+/** Points inside every triangle, away from its edges. */
+function surfaceSamples(list) {
+  const weights = [[1 / 3, 1 / 3], [0.1, 0.1], [0.8, 0.1], [0.1, 0.8], [0.45, 0.45], [0.05, 0.5], [0.5, 0.05]];
+  return list.flatMap(([a, b, c]) => weights.map(([u, w]) => a.map((value, axis) => value + (b[axis] - value) * u + (c[axis] - value) * w)));
+}
+
+/** Parity of the crossings of a ray in a skew direction with a closed mesh. */
+function insideMesh(point, list) {
+  const direction = [0.5773, 0.5774, 0.5775];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  let crossings = 0;
+  for (const [a, b, c] of list) {
+    const edge1 = sub(b, a);
+    const edge2 = sub(c, a);
+    const h = cross(direction, edge2);
+    const det = dot(edge1, h);
+    if (Math.abs(det) < 1e-12) continue;
+    const s = sub(point, a);
+    const u = dot(s, h) / det;
+    if (u < 0 || u > 1) continue;
+    const q = cross(s, edge1);
+    const v = dot(direction, q) / det;
+    if (v < 0 || u + v > 1) continue;
+    if (dot(edge2, q) / det > 0) crossings += 1;
+  }
+  return crossings % 2 === 1;
+}

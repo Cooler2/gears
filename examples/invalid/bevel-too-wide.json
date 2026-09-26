@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 6,
+  "kind": "bevelGear",
+  "units": "mm",
+  "rim": {
+    "module": 2,
+    "toothCount": 30,
+    "mateToothCount": 20,
+    "shaftAngle": 90,
+    "pressureAngle": 20,
+    "profileShift": 0,
+    "backlash": 0.1,
+    "width": 10,
+    "radialThickness": 2
+  },
+  "flanges": {
+    "lower": null,
+    "upper": null
+  },
+  "web": {
+    "type": "solid",
+    "thinning": 0,
+    "alignment": "lower",
+    "axialOffset": 0,
+    "hubTaper": 0,
+    "rimTaper": 0
+  },
+  "hub": {
+    "outerDiameter": 16,
+    "lowerExtension": 0,
+    "upperExtension": 0
+  },
+  "bore": { "shape": "round", "diameter": 8 },
+  "generation": {
+    "maxChordError": 0.03
+  }
+}

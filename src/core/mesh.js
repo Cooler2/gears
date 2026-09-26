@@ -16,7 +16,8 @@ const MAX_TRIANGLES = 200000;
  * the contours are: the bore (a circle or a shaped loop, see buildBoreContour),
  * hub R_h, rim inner circle R_i, the working surface of
  * the rim (see rims.js) and the flange edges R_o + E_f. A helical working surface
- * is a stack of walls between turned copies of one contour. Axially the rim spans [−W/2, +W/2], flanges add
+ * is a stack of walls between turned copies of one contour, a bevel one a wall
+ * between the contour and its copy scaled towards the axis. Axially the rim spans [−W/2, +W/2], flanges add
  * their thickness outside it, the hub spans [hubLowerZ, hubUpperZ] and the web
  * [webLowerZ, webUpperZ]. Between the web levels the hub cylinder and the rim
  * inner surface are covered by the web; with spokes they stay exposed inside
@@ -100,8 +101,12 @@ export function buildPulleyMesh(description, derived) {
   if (circles.some((contour) => contour && contour.points.length > MAX_LOOP_SEGMENTS)) return complexityFailure();
   // the working surface alone would exceed the triangle limit: stop before building it
   if (2 * contours.profile.points.length * (surface.sections.length - 1) > MAX_TRIANGLES) return complexityFailure();
-  // sections without a turn share the profile contour, so the rim ends of straight teeth stay as they were
-  const sections = surface.sections.map(({ z, turn }) => ({ z, contour: turn === 0 ? contours.profile : { points: turnContour(surface.points, turn) } }));
+  // sections without a turn or a scale share the profile contour, so the rim ends of straight teeth stay as they were
+  const sections = surface.sections.map(({ z, turn, scale = 1 }) => {
+    if (turn === 0 && scale === 1) return { z, contour: contours.profile };
+    const turned = turnContour(surface.points, turn);
+    return { z, contour: { points: scale === 1 ? turned : turned.map(([x, y]) => [x * scale, y * scale]) } };
+  });
 
   const mesh = createMeshBuilder();
   const loops = new Map();

@@ -2,7 +2,7 @@
 
 Site: **https://apus-software.com/gears/** · [Русский](README.ru.md)
 
-A browser generator of power transmission parts for 3D printing: a GT2 timing pulley, a smooth pulley (a tensioner or a belt idler) and an involute gear with straight, helical or herringbone teeth. Parameters are set in groups with explanatory drawings, and the part is built locally in a background thread of the browser. The result is shown in 3D and downloaded as STL. The interface is in English, with a Russian page at `index_ru.html`.
+A browser generator of power transmission parts for 3D printing: a GT2 timing pulley, a smooth pulley (a tensioner or a belt idler), an involute gear with straight, helical or herringbone teeth, and a straight bevel gear for shafts at an angle. Parameters are set in groups with explanatory drawings, and the part is built locally in a background thread of the browser. The result is shown in 3D and downloaded as STL. The interface is in English, with a Russian page at `index_ru.html`.
 
 No generation server is needed: the JavaScript core runs both in the browser and in Node.js. There are no external dependencies and no build step; only Node.js 20 or newer is needed, for the local server, the command line and the tests.
 
@@ -16,7 +16,7 @@ npm run ui          # or node tools/serve.js 8517
 
 Then open `http://127.0.0.1:8517/` (the Russian page is `http://127.0.0.1:8517/src/ui/index_ru.html`). The server serves the project files and listens on `127.0.0.1` only; it is needed because browsers do not load ES modules, the schema and the examples from `file://`. If the port is taken, pass another one: `npm run ui -- 8518`. The address `localhost` may not work: browsers often try the IPv6 address `::1` first, where another program may answer.
 
-The workflow: on the Presets page you choose a part kind and a ready-made preset or a new part with default sizes, then set the parameters group by group — the rim, flanges, web and spokes, hub, shaft bore, model accuracy. Values are kept in `localStorage`; an address like `#group=web&field=/web/filletRadius` opens the group with the field focused. Next to the form, drawings explain every field: cross and axial sections, the chord tolerance diagram, and for a gear also close-up and side views of the teeth. Clicking a dimension goes to its field, clicking a part of the drawing opens its group. Errors and recommendations are shown next to the fields. Download STL saves the part standing on the bed with its bottom face, Save and Open save and load its description as JSON.
+The workflow: on the Presets page you choose a part kind and a ready-made preset or a new part with default sizes, then set the parameters group by group — the rim, flanges, web and spokes, hub, shaft bore, model accuracy. Values are kept in `localStorage`; an address like `#group=web&field=/web/filletRadius` opens the group with the field focused. Next to the form, drawings explain every field: cross and axial sections, the chord tolerance diagram, and for a gear also close-up and side views of the teeth (for a bevel gear, the pitch cones of the pair). Clicking a dimension goes to its field, clicking a part of the drawing opens its group. Errors and recommendations are shown next to the fields. Download STL saves the part standing on the bed with its bottom face, Save and Open save and load its description as JSON.
 
 ## Supported parts
 
@@ -30,6 +30,8 @@ The workflow: on the Presets page you choose a part kind and a ready-made preset
 | Gear: profile shift coefficient `x` | −1…1 | 0 |
 | Gear: tooth thinning `j` | 0…1 mm | 0.1 |
 | Gear: teeth / helix angle `β` | straight, helical, herringbone / −45…45° | straight / 20 |
+| Bevel gear: module of the large end `m` / tooth count `N` | 0.3…10 mm / 6…200 | 2 / 20 |
+| Bevel gear: teeth of the mating gear `N₂` / shaft angle `Σ` | 6…200 / 30…150° | 30 / 90 |
 | Width of the toothed part, gear rim or smooth rim `W` | 2…50 mm | 6 |
 | Rim under the grooves or teeth, smooth rim wall `T_r` (radial) | 1…25 mm | 2 |
 | Pulley flange: thickness / extension beyond the tips or the rim surface | 0.4…5 / 0.5…10 mm | 1 / 1 |
@@ -44,9 +46,9 @@ The workflow: on the Presets page you choose a part kind and a ready-made preset
 | Hub extensions below and above the faces of the part | −5…50 mm | 0 |
 | Chord tolerance | 0.01…0.25 mm | 0.05 |
 
-Besides the ranges, related constraints apply: tooth thickness after thinning and the space between teeth, the hub wall at its thinnest point, room between the hub and the rim, a web at least 1 mm thick, the web within the part, the hub along the whole height of the web, fillets and the spoke layout. A violation is explained next to the field. A gear warns about root undercut at small tooth counts and about pointed teeth. The sign of the helix angle sets the hand: plus is right-hand, minus is left-hand; the two gears of a pair have opposite signs. Cones that do not fit between the hub and the rim at the web get shorter and keep their angles.
+Besides the ranges, related constraints apply: tooth thickness after thinning and the space between teeth, the hub wall at its thinnest point, room between the hub and the rim, a web at least 1 mm thick, the web within the part, the hub along the whole height of the web, fillets and the spoke layout. A violation is explained next to the field. A gear warns about root undercut at small tooth counts and about pointed teeth. A bevel gear limits its pitch cone to 80° and its tooth length along the cone to half the cone distance, and advises a third. The sign of the helix angle sets the hand: plus is right-hand, minus is left-hand; the two gears of a pair have opposite signs. Cones that do not fit between the hub and the rim at the web get shorter and keep their angles.
 
-The description format is `schemaVersion: 6`: the `kind` field (`timingPulley`, `idlerPulley` or `gear`) selects the rim. The web and the hub are measured from the faces of the part — the outer faces of the flanges, or the rim ends without a flange. By default the web is aligned to the bottom, and the part lies on the bed on its flat base. Files of earlier versions open and read with the same geometry and are saved as version 6. The full specification is [`docs/contract.md`](docs/contract.md), geometry and assumptions are in [`docs/geometry.md`](docs/geometry.md), the schema is [`schemas/pulley-v6.schema.json`](schemas/pulley-v6.schema.json); the documents are in Russian.
+The description format is `schemaVersion: 6`: the `kind` field (`timingPulley`, `idlerPulley`, `gear` or `bevelGear`) selects the rim. The web and the hub are measured from the faces of the part — the outer faces of the flanges, or the rim ends without a flange. By default the web is aligned to the bottom, and the part lies on the bed on its flat base. Files of earlier versions open and read with the same geometry and are saved as version 6. The full specification is [`docs/contract.md`](docs/contract.md), geometry and assumptions are in [`docs/geometry.md`](docs/geometry.md), the schema is [`schemas/pulley-v6.schema.json`](schemas/pulley-v6.schema.json); the documents are in Russian.
 
 ## Command line
 
@@ -70,7 +72,7 @@ The `--blender` option is optional: with it, Blender in background mode addition
 node --test
 ```
 
-77 tests, about 15 seconds, no browser needed. The core is checked for reproducibility, profile formulas, related constraints and mesh invariants — orientation, closed edges, a single connected shell, positive volume; contour shapes and volume are compared with the analytical description, and the STL is read back by a separate parser. Form tests make sure every visible field has a dimension on the drawing of its group and every diagnostic has a text, and that the English and the Russian dictionaries have the same keys. Integration tests check the background thread: agreement with the core, the request queue, cancelling a long build and replacing a crashed thread. The end-to-end browser check is manual.
+80 tests, about 15 seconds, no browser needed. The core is checked for reproducibility, profile formulas, related constraints and mesh invariants — orientation, closed edges, a single connected shell, positive volume; contour shapes and volume are compared with the analytical description, and the STL is read back by a separate parser. Form tests make sure every visible field has a dimension on the drawing of its group and every diagnostic has a text, and that the English and the Russian dictionaries have the same keys. Integration tests check the background thread: agreement with the core, the request queue, cancelling a long build and replacing a crashed thread. The end-to-end browser check is manual.
 
 ## Building the site
 
@@ -83,7 +85,7 @@ The build puts a static site into `dist/`: both pages at the root, the modules, 
 
 ## Layout
 
-- `src/core/` — the core, free of the browser and DOM: structure and diagnostics (`parameters.js`), rims and profiles (`rims.js`, `involute.js`, `contours.js`), spokes, mesh assembly and verification, drawing geometry, the entry point `generate.js`;
+- `src/core/` — the core, free of the browser and DOM: structure and diagnostics (`parameters.js`), rims and profiles (`rims.js`, `involute.js`, `bevel.js`, `contours.js`), spokes, mesh assembly and verification, drawing geometry, the entry point `generate.js`;
 - `src/export/stl.js` — binary STL and placement on the bed;
 - `src/worker/` — the background thread and its client: request queue, answer freshness, timeout and restart;
 - `src/ui/` — the interface: fields and groups, state, SVG drawings, diagnostic texts, presets, a WebGL 3D view without libraries; all texts are in the dictionaries `locale-en.js` and `locale-ru.js`;
@@ -95,6 +97,7 @@ The build puts a static site into `dist/`: both pages at the root, the modules, 
 
 - The `gt2-2mm-experimental-v1` profile is experimental: the pitch and the outside diameter match the catalogue, the groove shape is confirmed by printing only. Belt fit on test pulleys has not been checked.
 - Gears are built without a root fillet, and real undercut is not modelled: below the base circle the flank runs radially, and a warning is shown for small tooth counts. Gear pairs — centre distance and meshing — are not checked; keeping the same module, pressure angle and helix angle magnitude in a pair is up to the user. Meshing of printed gears has not been tested.
+- Bevel gears have straight teeth only, by Tredgold's approximation with the tooth depth tapering to the apex; spiral bevel teeth and a constant tip clearance are not supported. The large end is a flat face through its tip circle rather than a back cone. The mating gear is set by its tooth count; the same tooth length along the cone in a pair is up to the user.
 - No load rating is claimed. Printer hole compensation is not built into the model: put the fit clearance into the bore diameter.
 - The upper flange is printed as an overhang above the grooves, and its lower face comes out rough.
 - The core does not fully check self-intersections: unlucky parameter combinations within the limits can give an incorrect model.

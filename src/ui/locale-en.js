@@ -1,7 +1,7 @@
 // Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // English texts of the page. The keys are the same as in locale-ru.js, a test checks it.
 import { formatNumber as n } from "./format.js";
-import { isGear, isIdler, isInclined, isSpokes } from "./part.js";
+import { isBevel, isGear, isIdler, isInclined, isSpokes } from "./part.js";
 
 /** The rim of the kind in words: a toothed part of a pulley, a gear rim or a smooth rim. */
 function rimWord(description) {
@@ -23,7 +23,8 @@ export default {
   kinds: {
     timingPulley: { title: "GT2 pulley", text: "A toothed pulley for a GT2 belt with a 2 mm pitch." },
     idlerPulley: { title: "Smooth pulley", text: "A roller without teeth: a belt tensioner or an idler." },
-    gear: { title: "Gear", text: "Involute teeth: straight, helical or herringbone. The gears of a pair must have the same module, pressure angle and helix angle." }
+    gear: { title: "Gear", text: "Involute teeth: straight, helical or herringbone. The gears of a pair must have the same module, pressure angle and helix angle." },
+    bevelGear: { title: "Bevel gear", text: "Straight teeth on a cone, for shafts at an angle, usually 90°. The gears of a pair must have the same module, pressure angle and shaft angle; each one is set with the tooth count of the other." }
   },
 
   groups: {
@@ -39,15 +40,27 @@ export default {
   fields: {
     "/rim/module": {
       label: "Module",
-      hint: (description) => isInclined(description)
+      hint: (description) => isBevel(description)
+        ? "Tooth size at the large end, which is the lower face: the pitch diameter there is mN, the pitch πm. Towards the apex of the cone the teeth get smaller. The gears of a pair must have the same module."
+        : isInclined(description)
         ? "Tooth size across the tooth (normal module): the tooth height and thickness are those of a spur gear of this module, while the pitch diameter is 1/cos β times larger, mN/cos β. The gears of a pair must have the same module."
         : "Tooth size: the pitch along the pitch circle is πm, the pitch diameter is mN. The gears of a pair must have the same module."
     },
     "/rim/toothCount": {
       label: "Number of teeth",
-      hint: (description) => isGear(description)
+      hint: (description) => isBevel(description)
+        ? "The gear ratio of a pair is the ratio of their tooth counts. The mating gear is made with this count and the count of the mating gear swapped."
+        : isGear(description)
         ? "The gear ratio of a pair is the ratio of their tooth counts."
         : "Grooves for the teeth of a GT2 belt with a 2 mm pitch. The pitch diameter is 2N/π."
+    },
+    "/rim/mateToothCount": {
+      label: "Teeth of the mating gear",
+      hint: "Together with the shaft angle it sets the pitch cone: tan δ = sin Σ / (N₂/N + cos Σ). Two equal gears at 90° have 45° cones. The drawing shows the pitch cones of the pair."
+    },
+    "/rim/shaftAngle": {
+      label: "Shaft angle",
+      hint: "Between the axes of the two gears, usually 90°; both gears of a pair have the same. The pitch cone angles of the pair add up to it."
     },
     "/rim/pressureAngle": {
       label: "Pressure angle",
@@ -79,7 +92,9 @@ export default {
     },
     "/rim/width": {
       label: (description) => isIdler(description) ? "Rim width" : isGear(description) ? "Face width" : "Toothed width",
-      hint: (description) => isGear(description)
+      hint: (description) => isBevel(description)
+        ? "Height of the teeth along the axis, from the large end at the bottom towards the apex of the cone, where the teeth shrink. The gears of a pair need teeth of the same length along the cone, which is shown under the fields; usually at most a third of the cone distance. Hub extensions are not included."
+        : isGear(description)
         ? "Tooth length along the axis. Hub extensions are not included."
         : "Usually 0.5–1 mm wider than the belt. Flanges and hub extensions are not included."
     },
@@ -88,6 +103,8 @@ export default {
       label: (description) => isIdler(description) ? "Rim wall" : isGear(description) ? "Rim under the teeth" : "Rim under the grooves",
       hint: (description) => isIdler(description)
         ? "The ring of material under the rim surface, radially inwards to the web or the spokes."
+        : isBevel(description)
+        ? "The ring of material under the teeth of the small end, the upper one: radially from its root circle inwards to the web or the spokes. Towards the large end the ring gets thicker."
         : `The ring of material under the ${isGear(description) ? "teeth" : "grooves"}: radially from the ${isGear(description) ? "root circle" : "groove bottoms"} inwards to the web or the spokes.`
     },
     "/flanges/lower": {
@@ -218,7 +235,10 @@ export default {
     "gear-helical-30t.json": { title: "30 teeth, helical right", text: "Module 1.5, helix +20°, 8 mm bore. The mating gear has left-hand teeth, −20°." },
     "gear-helical-15t.json": { title: "15 teeth, helical left", text: "Pairs with the right-hand 30 teeth: module 1.5, helix −20°, 5 mm D-shaft." },
     "gear-herringbone-32t.json": { title: "Herringbone, 32 teeth", text: "Module 1.5, helix +30°, 12 mm wide, 8 mm bore, the hub and the rim widen towards the web. The mating gear has a −30° helix." },
-    "gear-herringbone-12t.json": { title: "Herringbone, 12 teeth, no web", text: "Pairs with the 32 teeth: module 1.5, helix −30°, teeth right on the hub, 5 mm D-shaft." }
+    "gear-herringbone-12t.json": { title: "Herringbone, 12 teeth, no web", text: "Pairs with the 32 teeth: module 1.5, helix −30°, teeth right on the hub, 5 mm D-shaft." },
+    "bevel-20t.json": { title: "20 teeth for 30, 90°", text: "Module 2, 43 mm across the large end, teeth right on the hub, 5 mm D-shaft. Pairs with the 30 teeth at a right angle." },
+    "bevel-30t.json": { title: "30 teeth for 20, 90°", text: "Module 2, 62 mm across the large end, solid body, 8 mm bore. Pairs with the 20 teeth: same tooth length along the cone." },
+    "bevel-miter-16t.json": { title: "Miter gear, 16 teeth", text: "Two equal gears at a right angle turn the motion by 90° at 1:1: module 1.5, 45° cones, 5 mm bore." }
   },
 
   // the core returns only codes, paths and numeric details; every sentence a person reads is composed here
@@ -277,6 +297,13 @@ export default {
       `Take at least ${minimum} teeth or a profile shift of ${n(Math.ceil(shift * 100) / 100)} or more.`,
     W_GEAR_POINTED: ({ tipDiameter, fullTipDiameter }) =>
       `The teeth are pointed: the tips are cut to ${n(tipDiameter)} mm diameter instead of ${n(fullTipDiameter)} mm. Reduce the profile shift or the tooth thinning.`,
+    E_BEVEL_CONE: ({ coneAngle, maximum }) =>
+      `The pitch cone is almost flat: its angle comes out ${n(coneAngle)}°, at most ${n(maximum)}° is supported. ` +
+      "Take fewer teeth on this gear, more on the mating one, or a smaller shaft angle.",
+    E_BEVEL_WIDTH: ({ maximum }) =>
+      `The teeth reach too close to the apex of the cone, where they become too small to print: the face width may be at most ${n(maximum)} mm.`,
+    W_BEVEL_WIDTH: ({ usual, coneDistance }) =>
+      `The teeth are longer than a third of the cone distance (${n(coneDistance)} mm), which is ${n(usual)} mm of face width: the small end is weak and carries little load. It will be built, but shorter teeth are usual.`,
     W_THIN_FEATURE: ({ value, recommended }) =>
       `Thinner than ${n(recommended)} mm (${n(value)} mm now): the model will be built, but check that your printer can print such a wall.`,
     W_EXPERIMENTAL_PROFILE: () =>
@@ -300,6 +327,15 @@ export default {
     tipDiameter: "Tip diameter",
     rootDiameter: "Root diameter",
     baseDiameter: "Base diameter",
+    largePitchDiameter: "Pitch diameter of the large end",
+    largeTipDiameter: "Tip diameter of the large end",
+    smallRootDiameter: "Root diameter of the small end",
+    coneAngle: "Pitch cone angle",
+    mateConeAngle: "Pitch cone angle of the mating gear",
+    coneDistance: "Cone distance of the large end",
+    faceLength: "Tooth length along the cone",
+    apexHeight: "Cone apex above the lower face",
+    virtualTeeth: "Teeth of the virtual gear, N/cos δ",
     pitch: "Circular pitch",
     transversePitch: "Transverse circular pitch",
     transverseModule: "Transverse module",
@@ -328,6 +364,11 @@ export default {
     section: "Axial section",
     tooth: "Teeth close up",
     helix: "Teeth from the side",
+    cone: "Pitch cones of the pair",
+    apex: "apex",
+    mate: "mating gear",
+    coneAngle: "pitch cone",
+    backCone: "virtual gear on the back cone, to scale",
     chord: "Chord tolerance diagram",
     pitch: (inclined) => inclined ? "transverse pitch πm/cos β" : "pitch πm",
     transverse: "transverse",

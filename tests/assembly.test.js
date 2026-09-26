@@ -17,7 +17,11 @@ async function kindBases() {
     rim: { module: 1, toothCount: 40, pressureAngle: 20, profileShift: 0.2, backlash: 0.1, helix: "none", width: timing.rim.width, radialThickness: 2 }
   };
   const inclined = (helix, helixAngle) => ({ ...structuredClone(gear), rim: { ...gear.rim, helix, helixAngle } });
-  return { timing, idler, gear, helical: inclined("helical", -25), herringbone: inclined("herringbone", 40) };
+  const bevel = {
+    ...structuredClone(timing), kind: "bevelGear",
+    rim: { module: 2, toothCount: 20, mateToothCount: 30, shaftAngle: 90, pressureAngle: 20, profileShift: 0.2, backlash: 0.1, width: timing.rim.width, radialThickness: 2 }
+  };
+  return { timing, idler, gear, helical: inclined("helical", -25), herringbone: inclined("herringbone", 40), bevel };
 }
 
 const FLANGE_VARIANTS = {
@@ -62,8 +66,8 @@ const BORE_VARIANTS = {
 test("every kind, flange, web and hub-extension combination builds one closed solid", async () => {
   for (const [kindName, base] of Object.entries(await kindBases())) {
   for (const [flangeName, flanges] of Object.entries(FLANGE_VARIANTS)) {
-    // a gear has no flanges
-    if (base.kind === "gear" && flangeName !== "none") continue;
+    // gears have no flanges
+    if (base.kind !== "timingPulley" && base.kind !== "idlerPulley" && flangeName !== "none") continue;
     for (const [webName, web] of Object.entries(WEB_VARIANTS)) {
       for (const [lowerExtension, upperExtension] of HUB_VARIANTS) {
         const input = { ...structuredClone(base), flanges, web };
@@ -383,8 +387,10 @@ function expectedSolidWebVolume(input, derived) {
     return sum;
   };
   const halfWidth = input.rim.width / 2;
+  // a bevel working surface is a frustum: the upper contour is the lower one scaled by s, so the mean area is (1 + s + s²)/3 of it
+  const scale = derived.endScale;
   const bore = polygonArea(buildBoreContour(input.bore, error).points);
-  let volume = polygonArea(surface.points) * input.rim.width - integrate(rimInnerArea, -halfWidth, halfWidth);
+  let volume = polygonArea(surface.points) * (1 + scale + scale ** 2) / 3 * input.rim.width - integrate(rimInnerArea, -halfWidth, halfWidth);
   volume += integrate(hubArea, derived.hubLowerZ, derived.hubUpperZ) - bore * (derived.hubUpperZ - derived.hubLowerZ);
   volume += integrate(rimInnerArea, webLowerZ, webUpperZ) - integrate(hubArea, webLowerZ, webUpperZ);
   for (const [flange, z0, z1] of [[input.flanges.lower, derived.faceLowerZ, -halfWidth], [input.flanges.upper, halfWidth, derived.faceUpperZ]]) {

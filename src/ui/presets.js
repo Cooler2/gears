@@ -23,5 +23,8 @@ export const PRESETS = [
   preset("gear-helical-30t.json"),
   preset("gear-helical-15t.json"),
   preset("gear-herringbone-32t.json"),
-  preset("gear-herringbone-12t.json")
+  preset("gear-herringbone-12t.json"),
+  preset("bevel-20t.json"),
+  preset("bevel-30t.json"),
+  preset("bevel-miter-16t.json")
 ];

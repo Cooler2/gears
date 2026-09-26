@@ -13,7 +13,7 @@ import { buildPlanView, validateDescription } from "../core/generate.js";
 import { exportBinaryStl } from "../export/stl.js";
 import { GENERATOR, VERSION } from "../about.js";
 import { BuildClient } from "../worker/client.js";
-import { chordSummary, renderChord, renderHelix, renderPlan, renderSection, renderTooth } from "./drawings.js";
+import { chordSummary, renderChord, renderCone, renderHelix, renderPlan, renderSection, renderTooth } from "./drawings.js";
 import { FIELD_BY_PATH, GROUPS, KINDS, fieldHint, fieldLabel, fieldOptions, fieldSchema, fieldsOf, fieldUnit, groupOfPath, groupsOf, groupTitle, kindOf } from "./fields.js";
 import { escapeHtml, formatCount, formatNumber, inputText, symbolHtml } from "./format.js";
 import { T } from "./locale.js";
@@ -27,13 +27,14 @@ const SECTION_FIRST = new Set(["flanges", "hub"]);
 const MAX_FILE_BYTES = 1 << 20; // a description is well under a kilobyte
 const BUILD_TIMEOUT_MS = 20000;
 const CONTEXT_VIEW_SCALE = 0.6; // labels of a view with no sizes of its own, relative to the main one
-const PRESET_KIND_ORDER = ["gear", "timingPulley", "idlerPulley"]; // gears open the variants page
+const PRESET_KIND_ORDER = ["gear", "bevelGear", "timingPulley", "idlerPulley"]; // gears open the variants page
 const $ = (selector) => document.querySelector(selector);
 const el = {
   nav: $("#groups"), title: $("#group-title"), form: $("#form"), sizes: $("#sizes"), status: $("#status"), drawings: $("#drawings"),
   plan: $("#plan"), section: $("#section"), sectionTag: $("#section-tag"), planTag: $("#plan-tag"),
   chordFigure: $("#chord-figure"), chord: $("#chord"), planFigure: $("#plan-figure"), sectionFigure: $("#section-figure"),
   toothFigure: $("#tooth-figure"), tooth: $("#tooth"), toothTag: $("#tooth-tag"), helixFigure: $("#helix-figure"), helix: $("#helix"),
+  coneFigure: $("#cone-figure"), cone: $("#cone"),
   stale: $("#stale"), file: $("#file-input"), notice: $("#notice"),
   viewport: $("#viewport"), canvas: $("#viewer"), previewState: $("#preview-state"), overlay: $("#preview-overlay"),
   previewInfo: $("#preview-info"), retry: $("#retry"), stl: $("#download-stl"),
@@ -282,6 +283,10 @@ function computedMarkup() {
       gear: [[S.pitchDiameter, 2 * derived.pitchRadius], [S.tipDiameter, 2 * derived.outsideRadius], [S.rootDiameter, 2 * derived.rootRadius],
         [S.baseDiameter, 2 * derived.baseRadius], [derived.lead === null ? S.pitch : S.transversePitch, derived.pitch],
         [S.transverseModule, derived.lead === null ? null : derived.transverseModule], [S.lead, derived.lead], [S.rimInner, rimInner]],
+      bevelGear: [[S.largePitchDiameter, 2 * derived.pitchRadius], [S.largeTipDiameter, 2 * derived.outsideRadius], [S.smallRootDiameter, 2 * derived.rootRadius],
+        [S.pitch, derived.pitch], [S.coneAngle, derived.pitchConeAngle, "deg"], [S.mateConeAngle, derived.mateConeAngle, "deg"],
+        [S.coneDistance, derived.coneDistance], [S.faceLength, derived.faceWidth], [S.apexHeight, derived.apexZ - derived.faceLowerZ],
+        [S.virtualTeeth, derived.virtualToothCount, ""], [S.rimInner, rimInner]],
       timingPulley: [[S.pulleyOutside, 2 * derived.outsideRadius], [S.pitchDiameter, 2 * derived.pitchRadius], [S.grooveRoot, 2 * derived.grooveRootRadius], [S.rimInner, rimInner]]
     }[model.normalized.kind],
     flanges: [[S.lowerFlange, derived.lowerFlangeOuterRadius && 2 * derived.lowerFlangeOuterRadius], [S.upperFlange, derived.upperFlangeOuterRadius && 2 * derived.upperFlangeOuterRadius], [S.height, derived.bounds.max[2] - derived.bounds.min[2]]],
@@ -300,8 +305,9 @@ function computedMarkup() {
       `<div><dt>${escapeHtml(S.circles[name])} ⌀${formatNumber(diameter)} ${mm}</dt><dd>${segments}</dd></div>`).join("")}</dl></div>`;
   }
   if (!rows.length) return "";
-  return `<div class="computed"><h3>${S.title}${previous}</h3><dl>${rows.map(([name, value]) =>
-    `<div><dt>${escapeHtml(name)}</dt><dd>${formatNumber(value)} ${mm}</dd></div>`).join("")}</dl></div>`;
+  // sizes are in millimetres unless a row names its unit: degrees, or none for a count
+  return `<div class="computed"><h3>${S.title}${previous}</h3><dl>${rows.map(([name, value, unit = "mm"]) =>
+    `<div><dt>${escapeHtml(name)}</dt><dd>${formatNumber(value)}${unit === "deg" ? T.units.deg : unit ? ` ${T.units[unit]}` : ""}</dd></div>`).join("")}</dl></div>`;
 }
 
 function boreRows({ normalized: { bore }, derived }) {
@@ -407,8 +413,8 @@ function drawingContext() {
 function renderDrawings() {
   el.stale.hidden = Boolean(result.normalized);
   if (!model) {
-    el.plan.innerHTML = el.section.innerHTML = el.tooth.innerHTML = el.helix.innerHTML = "";
-    el.toothFigure.hidden = el.helixFigure.hidden = true;
+    el.plan.innerHTML = el.section.innerHTML = el.tooth.innerHTML = el.helix.innerHTML = el.cone.innerHTML = "";
+    el.toothFigure.hidden = el.helixFigure.hidden = el.coneFigure.hidden = true;
     return;
   }
   const ctx = drawingContext();
@@ -427,14 +433,19 @@ function renderDrawings() {
   const words = T.drawings;
   el.planTag.textContent = view.group === "bore" ? words.hubCloseUp : model.plan.spokes?.schematic ? words.schematicSpokes : words.toScale;
   el.sectionTag.textContent = model.normalized.web.type === "spokes" ? words.spokeSection : words.toScale;
-  // gear teeth get a larger view of their own sizes
-  const teeth = view.group === "rim" && model.normalized.kind === "gear";
-  el.toothFigure.hidden = el.helixFigure.hidden = !teeth;
+  // gear teeth get a larger view of their own sizes, and the side view of their helices or pitch cones
+  const { kind } = model.normalized;
+  const teeth = view.group === "rim" && (kind === "gear" || kind === "bevelGear");
+  const side = teeth && kind === "gear" ? [el.helixFigure, el.helix] : teeth ? [el.coneFigure, el.cone] : null;
+  el.toothFigure.hidden = !teeth;
+  el.helixFigure.hidden = side?.[0] !== el.helixFigure;
+  el.coneFigure.hidden = side?.[0] !== el.coneFigure;
   el.tooth.innerHTML = teeth ? renderTooth(model, ctx) : "";
-  el.helix.innerHTML = teeth ? renderHelix(model, ctx) : "";
+  el.helix.innerHTML = teeth && kind === "gear" ? renderHelix(model, ctx) : "";
+  el.cone.innerHTML = teeth && kind === "bevelGear" ? renderCone(model, ctx) : "";
   if (teeth) {
-    el.toothTag.textContent = model.normalized.rim.helix === "none" ? words.toScale : words.transverseSection;
-    for (const [figure, drawing] of [[el.toothFigure, el.tooth], [el.helixFigure, el.helix]]) {
+    el.toothTag.textContent = kind === "bevelGear" ? words.backCone : model.normalized.rim.helix === "none" ? words.toScale : words.transverseSection;
+    for (const [figure, drawing] of [[el.toothFigure, el.tooth], side]) {
       cropToContent(drawing.querySelector("svg"));
       setLabelSpan(figure, 1);
     }
@@ -657,7 +668,7 @@ el.status.addEventListener("click", (event) => {
 });
 
 // drawings: a dimension focuses its field, a part opens its group
-for (const container of [el.plan, el.section, el.chord, el.tooth, el.helix]) {
+for (const container of [el.plan, el.section, el.chord, el.tooth, el.helix, el.cone]) {
   container.addEventListener("click", (event) => pickFromDrawing(event.target));
   container.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -721,6 +732,7 @@ function partFileName({ kind, rim }) {
   if (kind === "idlerPulley") return `idler-${number(rim.outerDiameter)}mm`;
   const hand = rim.helixAngle > 0 ? "-right" : rim.helixAngle < 0 ? "-left" : "";
   const teeth = { none: "", helical: hand, herringbone: `-herringbone${hand}` }[rim.helix];
+  if (kind === "bevelGear") return `bevel-m${number(rim.module)}-${rim.toothCount}x${rim.mateToothCount}t${rim.shaftAngle === 90 ? "" : `-${number(rim.shaftAngle)}deg`}`;
   return kind === "gear" ? `gear-m${number(rim.module)}-${rim.toothCount}t${teeth}` : `pulley-${rim.toothCount}t`;
 }
 

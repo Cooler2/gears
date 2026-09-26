@@ -1,7 +1,8 @@
 // Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 import { boreExtents } from "./contours.js";
+import { bevelGeometry, MAX_CONE_ANGLE } from "./bevel.js";
 import { gearGeometry } from "./involute.js";
-import { HELICES, PART_KINDS, rimFields, rimRadii, rimSizePath, rimSurface } from "./rims.js";
+import { GEAR_KINDS, HELICES, PART_KINDS, rimFields, rimRadii, rimSizePath, rimSurface } from "./rims.js";
 import { planTapers } from "./taper.js";
 
 const SCHEMA_VERSION = 6;
@@ -23,6 +24,13 @@ const BORE_FIELDS = {
 const GENERATION_FIELDS = ["maxChordError"];
 const THIN_FEATURE = 1.2; // print recommendation, mm
 const MIN_WEB_THICKNESS = 1; // mm, the web limit of the earlier versions
+const DEGREE = Math.PI / 180;
+// tooth length of a bevel gear along the pitch cone as a share of the cone distance:
+// a third is the usual limit, both gears of a pair then keep it; past half the small
+// end is too small to print. The small end also keeps at least half the size of the lower face.
+const MAX_BEVEL_LENGTH = 1 / 2;
+const USUAL_BEVEL_LENGTH = 1 / 3;
+const BEVEL_CONE_PATHS = ["/rim/mateToothCount", "/rim/shaftAngle", "/rim/toothCount"];
 
 export function validateDescription(original) {
   const diagnostics = [];
@@ -179,14 +187,19 @@ function validateStatic(input, diagnostics) {
   } else if (exactObject(input.rim, rimFields(input.kind, input.rim), "/rim", diagnostics)) {
     if (input.kind === "idlerPulley") {
       numberRange(input.rim.outerDiameter, 5, 150, "/rim/outerDiameter", diagnostics);
-    } else if (input.kind === "gear") {
+    } else if (GEAR_KINDS.includes(input.kind)) {
       numberRange(input.rim.module, 0.3, 10, "/rim/module", diagnostics);
       integerRange(input.rim.toothCount, 6, 200, "/rim/toothCount", diagnostics);
       numberRange(input.rim.pressureAngle, 14.5, 30, "/rim/pressureAngle", diagnostics);
       numberRange(input.rim.profileShift, -1, 1, "/rim/profileShift", diagnostics);
       numberRange(input.rim.backlash, 0, 1, "/rim/backlash", diagnostics);
-      enumeration(input.rim.helix, HELICES, "/rim/helix", diagnostics);
-      if (input.rim.helix !== "none") numberRange(input.rim.helixAngle, -45, 45, "/rim/helixAngle", diagnostics);
+      if (input.kind === "gear") {
+        enumeration(input.rim.helix, HELICES, "/rim/helix", diagnostics);
+        if (input.rim.helix !== "none") numberRange(input.rim.helixAngle, -45, 45, "/rim/helixAngle", diagnostics);
+      } else {
+        integerRange(input.rim.mateToothCount, 6, 200, "/rim/mateToothCount", diagnostics);
+        numberRange(input.rim.shaftAngle, 30, 150, "/rim/shaftAngle", diagnostics);
+      }
     } else {
       constant(input.rim.profile, "gt2-2mm-experimental-v1", "/rim/profile", diagnostics);
       integerRange(input.rim.toothCount, 14, 120, "/rim/toothCount", diagnostics);
@@ -197,7 +210,7 @@ function validateStatic(input, diagnostics) {
   if (exactObject(input.flanges, FLANGES_FIELDS, "/flanges", diagnostics)) {
     for (const side of FLANGES_FIELDS) {
       // a flange past the tooth tips would stop the mating gear
-      if (input.kind === "gear" && input.flanges[side] !== null) constant(input.flanges[side], null, `/flanges/${side}`, diagnostics);
+      if (GEAR_KINDS.includes(input.kind) && input.flanges[side] !== null) constant(input.flanges[side], null, `/flanges/${side}`, diagnostics);
       else validateFlange(input.flanges[side], `/flanges/${side}`, diagnostics);
     }
   }
@@ -260,13 +273,24 @@ function validateRelations(input, derived, diagnostics) {
     diagnostics.push(diagnostic("E_RIM_NO_INTERIOR", "error", "description", [rimSizePath(input.kind), "/rim/radialThickness"],
       { rimInnerRadius: derived.rimInnerRadius }));
   }
-  if (input.kind === "gear") {
-    const gear = gearGeometry(input.rim);
+  if (GEAR_KINDS.includes(input.kind)) {
+    // a bevel gear has the teeth of its virtual spur gear
+    const gear = toothGeometry(input);
     if (gear.thin) {
       diagnostics.push(diagnostic("E_GEAR_TOOTH_THIN", "error", "description", ["/rim/backlash", "/rim/module", "/rim/profileShift"],
         { thickness: gear.thickness }));
     } else if (gear.closed) {
       diagnostics.push(diagnostic("E_GEAR_ROOT_CLOSED", "error", "description", ["/rim/profileShift", "/rim/toothCount", "/rim/pressureAngle"]));
+    }
+  }
+  if (input.kind === "bevelGear") {
+    const bevel = bevelGeometry(input.rim);
+    const coneAngle = bevel.coneAngle / DEGREE;
+    if (coneAngle > MAX_CONE_ANGLE) {
+      diagnostics.push(diagnostic("E_BEVEL_CONE", "error", "description", BEVEL_CONE_PATHS, { coneAngle, maximum: MAX_CONE_ANGLE }));
+    } else if (input.rim.width > bevelWidths(bevel).maximum + 1e-9) {
+      diagnostics.push(diagnostic("E_BEVEL_WIDTH", "error", "description", ["/rim/width", ...BEVEL_CONE_PATHS],
+        { maximum: bevelWidths(bevel).maximum, coneDistance: bevel.coneDistance }));
     }
   }
   const { bore } = input;
@@ -314,8 +338,9 @@ function validateRelations(input, derived, diagnostics) {
     // the fillets are then limited by the spoke width alone
     const spanKnown = span >= minimumWebSpan("spokes");
     // spokes join the hub and the rim at the web, where the cones have widened them
+    // shortened cones leave exactly 2R_f, so rounding must not count as a violation
     const webSpan = derived.rimInnerWebRadius - derived.hubWebRadius;
-    if (filletRadius > width / 2 || (spanKnown && 2 * filletRadius > webSpan)) {
+    if (filletRadius > width / 2 || (spanKnown && 2 * filletRadius > webSpan + 1e-9)) {
       diagnostics.push(diagnostic("E_SPOKE_FILLET", "error", "description", ["/web/width", "/web/filletRadius"],
         spanKnown ? { maxByWidth: width / 2, maxBySpan: webSpan / 2 } : { maxByWidth: width / 2 }));
     }
@@ -347,24 +372,51 @@ function addWarnings(input, derived, diagnostics) {
   if (input.web.type === "spokes" && input.web.width < THIN_FEATURE) diagnostics.push(thin("/web/width", input.web.width));
   if (hubWall < THIN_FEATURE) diagnostics.push(thin("/hub/outerDiameter", hubWall));
   if (input.kind === "timingPulley") diagnostics.push(diagnostic("W_EXPERIMENTAL_PROFILE", "warning", "build", ["/rim/profile"]));
-  if (input.kind === "gear") {
-    const gear = gearGeometry(input.rim);
+  if (GEAR_KINDS.includes(input.kind)) {
+    const gear = toothGeometry(input);
+    // a bevel gear is undercut as its virtual gear of N/cos δ teeth: its own limit is cos δ times that
+    const cone = input.kind === "bevelGear" ? bevelGeometry(input.rim).coneAngle : 0;
+    const virtualCount = input.rim.toothCount / Math.cos(cone);
     // the limit is rounded as usual: a 20° rack gives the textbook 17 teeth for 17.1, a trace of undercut is harmless
-    const minimum = Math.round(gear.undercutLimit);
+    const minimum = Math.round(gear.undercutLimit * Math.cos(cone));
     if (input.rim.toothCount < minimum) {
       diagnostics.push(diagnostic("W_GEAR_UNDERCUT", "warning", "build", ["/rim/toothCount", "/rim/profileShift"],
-        { minimum, shift: 1 - input.rim.toothCount * Math.sin(gear.transversePressureAngle) ** 2 / (2 * Math.cos(gear.helix)) }));
+        { minimum, shift: 1 - virtualCount * Math.sin(gear.transversePressureAngle) ** 2 / (2 * Math.cos(gear.helix)) }));
     }
     if (gear.pointed) {
       diagnostics.push(diagnostic("W_GEAR_POINTED", "warning", "build", ["/rim/profileShift", "/rim/backlash"],
-        { tipDiameter: 2 * gear.tip, fullTipDiameter: 2 * gear.fullTip }));
+        // a bevel gear tells the diameters of its large end, the virtual ones times cos δ
+        { tipDiameter: 2 * gear.tip * Math.cos(cone), fullTipDiameter: 2 * gear.fullTip * Math.cos(cone) }));
     }
   }
+  if (input.kind === "bevelGear") {
+    const bevel = bevelGeometry(input.rim);
+    const { usual, maximum } = bevelWidths(bevel);
+    if (bevel.coneAngle / DEGREE <= MAX_CONE_ANGLE && input.rim.width > usual + 1e-9 && input.rim.width <= maximum + 1e-9) {
+      diagnostics.push(diagnostic("W_BEVEL_WIDTH", "warning", "build", ["/rim/width"], { usual, coneDistance: bevel.coneDistance }));
+    }
+  }
+}
+
+/** Face widths along the axis for the usual and the largest tooth length along the cone. */
+function bevelWidths(bevel) {
+  const along = Math.cos(bevel.coneAngle) * bevel.coneDistance;
+  return { usual: USUAL_BEVEL_LENGTH * along, maximum: Math.min(MAX_BEVEL_LENGTH * along, bevel.apexHeight / 2) };
+}
+
+/**
+ * Involute teeth of a gear kind: those of the gear itself, or of the virtual spur
+ * gear on the back cone of a bevel gear. Pointed tips of a bevel gear are then
+ * measured on the back cone, in the virtual gear.
+ */
+function toothGeometry(input) {
+  return input.kind === "bevelGear" ? bevelGeometry(input.rim).virtual : gearGeometry(input.rim);
 }
 
 function derive(input) {
   const radii = rimRadii(input.kind, input.rim);
   const gear = input.kind === "gear" ? gearGeometry(input.rim) : null;
+  const bevel = input.kind === "bevelGear" ? bevelGeometry(input.rim) : null;
   const toothed = input.kind !== "idlerPulley";
   const outsideRadius = radii.outside;
   const noWeb = input.web.type === "none";
@@ -402,7 +454,7 @@ function derive(input) {
     input.flanges.upper ? outsideRadius + input.flanges.upper.radialExtension : 0);
   return {
     // belt pitch of a timing pulley, circular pitch of a gear along the pitch circle: π·m/cos β
-    pitch: input.kind === "timingPulley" ? 2 : gear ? Math.PI * gear.transverseModule : null,
+    pitch: input.kind === "timingPulley" ? 2 : gear ? Math.PI * gear.transverseModule : bevel ? Math.PI * input.rim.module : null,
     transverseModule: gear ? gear.transverseModule : null,
     // axial advance of a helical tooth over one turn, null for straight teeth
     lead: gear && gear.helix > 0 ? 2 * Math.PI * gear.pitch / Math.tan(gear.helix) : null,
@@ -412,6 +464,15 @@ function derive(input) {
     grooveRootRadius: input.kind === "timingPulley" ? radii.root : null,
     baseRadius: radii.base,
     rimInnerRadius,
+    // a bevel gear: the pitch cone and the sizes along it, the apex above the lower face,
+    // the small end relative to the large one, the teeth of the virtual gear
+    pitchConeAngle: bevel ? bevel.coneAngle / DEGREE : null,
+    mateConeAngle: bevel ? bevel.mateConeAngle / DEGREE : null,
+    coneDistance: bevel ? bevel.coneDistance : null,
+    faceWidth: bevel ? input.rim.width / Math.cos(bevel.coneAngle) : null,
+    apexZ: bevel ? -halfWidth + bevel.apexHeight : null,
+    endScale: bevel ? bevel.scaleAt(input.rim.width) : 1,
+    virtualToothCount: bevel ? bevel.virtualRim.toothCount : null,
     boreRadius,
     boreOuterRadius: bore.outerRadius,
     boreExtentX: { positive: bore.positiveX, negative: bore.negativeX },
