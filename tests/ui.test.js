@@ -78,9 +78,10 @@ test("each visible numeric field has a dimension on the drawings of its group", 
     for (const { id: group } of groupsOf(model.normalized).filter(({ id }) => id !== "presets")) {
       const ctx = contextFor(model, group);
       const { kind } = model.normalized;
-      const teeth = group === "rim" && (kind === "gear" || kind === "bevelGear");
-      // gears on parallel shafts show their helices from the side, bevel gears the pitch cones of the pair
-      const side = !teeth ? "" : kind === "gear" ? renderHelix(model, ctx) : renderCone(model, ctx);
+      const teeth = group === "rim" && (kind === "gear" || kind === "bevelGear" || kind === "rack");
+      // as on the page: gears on parallel shafts show their helices from the side, bevel gears the pitch cones
+      // of the pair; a rack has the close up of its teeth, the face view shows its tooth lines
+      const side = !teeth ? "" : kind === "gear" ? renderHelix(model, ctx) : kind === "bevelGear" ? renderCone(model, ctx) : "";
       const drawings = [renderPlan(model, ctx), renderSection(model, ctx), group === "generation" ? renderChord(model, ctx) : "", teeth ? renderTooth(model, ctx) : "", side].map(dimensionPaths);
       const drawn = drawings.flat();
       const expected = [...ctx.visible].filter((path) => numeric(FIELDS.find((field) => field.path === path)));

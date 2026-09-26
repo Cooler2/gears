@@ -1,7 +1,7 @@
 // Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 // English texts of the page. The keys are the same as in locale-ru.js, a test checks it.
 import { formatNumber as n } from "./format.js";
-import { isBevel, isGear, isIdler, isInclined, isSpokes } from "./part.js";
+import { isBevel, isGear, isIdler, isInclined, isRack, isSpokes } from "./part.js";
 
 /** The rim of the kind in words: a toothed part of a pulley, a gear rim or a smooth rim. */
 function rimWord(description) {
@@ -24,12 +24,13 @@ export default {
     timingPulley: { title: "GT2 pulley", text: "A toothed pulley for a GT2 belt with a 2 mm pitch." },
     idlerPulley: { title: "Smooth pulley", text: "A roller without teeth: a belt tensioner or an idler." },
     gear: { title: "Gear", text: "Involute teeth: straight, helical or herringbone. The gears of a pair must have the same module, pressure angle and helix angle." },
-    bevelGear: { title: "Bevel gear", text: "Straight teeth on a cone, for shafts at an angle, usually 90°. The gears of a pair must have the same module, pressure angle and shaft angle; each one is set with the tooth count of the other." }
+    bevelGear: { title: "Bevel gear", text: "Straight teeth on a cone, for shafts at an angle, usually 90°. The gears of a pair must have the same module, pressure angle and shaft angle; each one is set with the tooth count of the other." },
+    rack: { title: "Rack", text: "A straight bar with gear teeth: turns the rotation of a gear into travel along the rack. Straight, helical or herringbone teeth." }
   },
 
   groups: {
     presets: "Presets",
-    rim: (description) => isIdler(description) ? "Belt and rim" : isGear(description) ? "Teeth" : "Belt and teeth",
+    rim: (description) => isIdler(description) ? "Belt and rim" : isGear(description) || isRack(description) ? "Teeth" : "Belt and teeth",
     flanges: "Flanges",
     web: "Web and spokes",
     hub: "Hub",
@@ -42,6 +43,10 @@ export default {
       label: "Module",
       hint: (description) => isBevel(description)
         ? "Tooth size at the large end, which is the lower face: the pitch diameter there is mN, the pitch πm. Towards the apex of the cone the teeth get smaller. The gears of a pair must have the same module."
+        : isRack(description)
+        ? (isInclined(description)
+          ? "Tooth size across the tooth (normal module), as for the mating gear: the pitch along the rack is 1/cos β times larger, πm/cos β. The rack and the gear must have the same module."
+          : "Tooth size, as for the mating gear: the pitch along the rack is πm. The rack and the gear must have the same module.")
         : isInclined(description)
         ? "Tooth size across the tooth (normal module): the tooth height and thickness are those of a spur gear of this module, while the pitch diameter is 1/cos β times larger, mN/cos β. The gears of a pair must have the same module."
         : "Tooth size: the pitch along the pitch circle is πm, the pitch diameter is mN. The gears of a pair must have the same module."
@@ -50,6 +55,8 @@ export default {
       label: "Number of teeth",
       hint: (description) => isBevel(description)
         ? "The gear ratio of a pair is the ratio of their tooth counts. The mating gear is made with this count and the count of the mating gear swapped."
+        : isRack(description)
+        ? "Sets the length: the rack is N pitches long. Both ends are cut in the middle of a space, so racks laid end to end keep the pitch."
         : isGear(description)
         ? "The gear ratio of a pair is the ratio of their tooth counts."
         : "Grooves for the teeth of a GT2 belt with a 2 mm pitch. The pitch diameter is 2N/π."
@@ -64,7 +71,9 @@ export default {
     },
     "/rim/pressureAngle": {
       label: "Pressure angle",
-      hint: (description) => "Slope of the tooth flanks at the pitch circle. The standard is 20°; both gears of a pair must have the same." +
+      hint: (description) => (isRack(description)
+        ? "Slope of the straight tooth flanks from the perpendicular to the rack. The standard is 20°; the mating gear must have the same."
+        : "Slope of the tooth flanks at the pitch circle. The standard is 20°; both gears of a pair must have the same.") +
         (isInclined(description) ? " For a helical tooth the angle is set across the tooth; in the transverse section on the drawing it is larger." : "")
     },
     "/rim/profileShift": {
@@ -73,17 +82,25 @@ export default {
     },
     "/rim/backlash": {
       label: "Tooth thinning",
-      hint: "How much thinner the tooth is than nominal along the pitch circle, equally on both flanks. The backlash of a pair is the sum of the thinnings of both gears; 0.1–0.2 mm is usual for printing."
+      hint: (description) => isRack(description)
+        ? "How much thinner the tooth is than nominal along the pitch line, equally on both flanks. The backlash is the sum of the thinnings of the rack and the gear; 0.1–0.2 mm is usual for printing."
+        : "How much thinner the tooth is than nominal along the pitch circle, equally on both flanks. The backlash of a pair is the sum of the thinnings of both gears; 0.1–0.2 mm is usual for printing."
     },
     "/rim/helix": {
       label: "Teeth",
       options: { none: "Straight", helical: "Helical", herringbone: "Herringbone" },
-      hint: "Helical teeth mesh more smoothly and quietly than straight ones but push the shaft along its axis. " +
-        "Herringbone is two helical halves facing each other, so the axial forces cancel. The sign of the angle sets the hand."
+      hint: (description) => isRack(description)
+        ? "Helical teeth mesh more smoothly and quietly than straight ones but push the gear along its shaft. " +
+          "Herringbone is two helical halves facing each other, so the forces across the rack cancel. The sign of the angle sets the hand."
+        : "Helical teeth mesh more smoothly and quietly than straight ones but push the shaft along its axis. " +
+          "Herringbone is two helical halves facing each other, so the axial forces cancel. The sign of the angle sets the hand."
     },
     "/rim/helixAngle": {
       label: "Helix angle",
-      hint: "Between the tooth and the axis on the pitch cylinder. Plus is right-hand: the teeth rise counter-clockwise like a right-hand thread; minus is left-hand. For herringbone the sign refers to the lower half. " +
+      hint: (description) => isRack(description)
+        ? "Between the tooth and the width of the rack. Plus is right-hand: seen from the teeth, with the rack lying across, the teeth rise to the right; minus is left-hand. For herringbone the sign refers to the lower half. " +
+          "The mating gear has the same magnitude and the opposite sign: a +20 rack meshes with a −20 gear. Usually 15–30°, up to 45° for herringbone."
+        : "Between the tooth and the axis on the pitch cylinder. Plus is right-hand: the teeth rise counter-clockwise like a right-hand thread; minus is left-hand. For herringbone the sign refers to the lower half. " +
         "A pair has the same magnitude and opposite signs: +20 meshes with −20. A herringbone gear with the opposite sign is the same part turned over. Usually 15–30°, up to 45° for herringbone; a larger angle runs smoother and pushes harder along the axis."
     },
     "/rim/outerDiameter": {
@@ -91,9 +108,11 @@ export default {
       hint: "The smooth cylindrical surface the belt runs on."
     },
     "/rim/width": {
-      label: (description) => isIdler(description) ? "Rim width" : isGear(description) ? "Face width" : "Toothed width",
+      label: (description) => isIdler(description) ? "Rim width" : isGear(description) || isRack(description) ? "Face width" : "Toothed width",
       hint: (description) => isBevel(description)
         ? "Height of the teeth along the axis, from the large end at the bottom towards the apex of the cone, where the teeth shrink. The gears of a pair need teeth of the same length along the cone, which is shown under the fields; usually at most a third of the cone distance. Hub extensions are not included."
+        : isRack(description)
+        ? "Tooth length across the rack. It is printed lying on its side, so the width is the height on the printer bed."
         : isGear(description)
         ? "Tooth length along the axis. Hub extensions are not included."
         : "Usually 0.5–1 mm wider than the belt. Flanges and hub extensions are not included."
@@ -106,6 +125,10 @@ export default {
         : isBevel(description)
         ? "The ring of material under the teeth of the small end, the upper one: radially from its root circle inwards to the web or the spokes. Towards the large end the ring gets thicker."
         : `The ring of material under the ${isGear(description) ? "teeth" : "grooves"}: radially from the ${isGear(description) ? "root circle" : "groove bottoms"} inwards to the web or the spokes.`
+    },
+    "/rim/pitchHeight": {
+      label: "Height to the pitch line",
+      hint: "From the back of the rack to the pitch line. The axis of the mating gear lies this far from the back plus its pitch radius (plus xm for a shifted gear). The body under the tooth roots is 1.25m lower and needs at least 1 mm."
     },
     "/flanges/lower": {
       label: "Lower flange",
@@ -238,7 +261,10 @@ export default {
     "gear-herringbone-12t.json": { title: "Herringbone, 12 teeth, no web", text: "Pairs with the 32 teeth: module 1.5, helix −30°, teeth right on the hub, 5 mm D-shaft." },
     "bevel-20t.json": { title: "20 teeth for 30, 90°", text: "Module 2, 43 mm across the large end, teeth right on the hub, 5 mm D-shaft. Pairs with the 30 teeth at a right angle." },
     "bevel-30t.json": { title: "30 teeth for 20, 90°", text: "Module 2, 62 mm across the large end, solid body, 8 mm bore. Pairs with the 20 teeth: same tooth length along the cone." },
-    "bevel-miter-16t.json": { title: "Miter gear, 16 teeth", text: "Two equal gears at a right angle turn the motion by 90° at 1:1: module 1.5, 45° cones, 5 mm bore." }
+    "bevel-miter-16t.json": { title: "Miter gear, 16 teeth", text: "Two equal gears at a right angle turn the motion by 90° at 1:1: module 1.5, 45° cones, 5 mm bore." },
+    "rack-m1-30t.json": { title: "Rack, module 1", text: "30 teeth, 94 mm long, 8 mm wide. Meshes with the 12-tooth pinion without a web." },
+    "rack-helical-m15.json": { title: "Rack, helical right", text: "Module 1.5, helix +20°, 20 teeth. Meshes with the left-hand 15 teeth, −20°." },
+    "rack-herringbone-m15.json": { title: "Rack, herringbone", text: "Module 1.5, helix +30°, 12 mm wide. Meshes with the 12-tooth herringbone gear, −30°." }
   },
 
   // the core returns only codes, paths and numeric details; every sentence a person reads is composed here
@@ -287,9 +313,13 @@ export default {
     E_SPOKE_OVERLAP: ({ required, available }) =>
       `The spokes with their fillets do not fit at the hub: each needs ${n(required)} mm along the hub circle, there are ${n(available)} mm. ` +
       "Reduce the number of spokes, their width or fillets, or make the hub larger.",
-    E_GEAR_TOOTH_THIN: ({ thickness }) =>
-      `The tooth has no material left: along the pitch circle it would be ${n(thickness)} mm thick. ` +
-      "Reduce the tooth thinning, or take a larger module or profile shift.",
+    // a rack has no profile shift, and a pitch line in place of the circle
+    E_GEAR_TOOTH_THIN: ({ thickness }, smooth, paths) => paths.includes("/rim/profileShift")
+      ? `The tooth has no material left: along the pitch circle it would be ${n(thickness)} mm thick. ` +
+        "Reduce the tooth thinning, or take a larger module or profile shift."
+      : `The tooth has no material left: along the pitch line it would be ${n(thickness)} mm thick. Reduce the tooth thinning or take a larger module.`,
+    E_RACK_BODY: ({ thickness, minimum, minimumPitchHeight }) =>
+      `Under the tooth roots ${n(thickness)} mm of the rack is left, at least ${n(minimum)} mm is needed: make the height to the pitch line at least ${n(minimumPitchHeight)} mm or take a smaller module.`,
     E_GEAR_ROOT_CLOSED: () =>
       "Neighbouring teeth merge at the root, no space is left between them. Reduce the profile shift or the pressure angle, or take more teeth.",
     W_GEAR_UNDERCUT: ({ minimum, shift }) =>
@@ -304,6 +334,8 @@ export default {
       `The teeth reach too close to the apex of the cone, where they become too small to print: the face width may be at most ${n(maximum)} mm.`,
     W_BEVEL_WIDTH: ({ usual, coneDistance }) =>
       `The teeth are longer than a third of the cone distance (${n(coneDistance)} mm), which is ${n(usual)} mm of face width: the small end is weak and carries little load. It will be built, but shorter teeth are usual.`,
+    W_RACK_POINTED: ({ tipHeight, fullTipHeight }) =>
+      `The teeth are pointed: the tips are cut to ${n(tipHeight)} mm from the back instead of ${n(fullTipHeight)} mm. Reduce the tooth thinning or the pressure angle.`,
     W_THIN_FEATURE: ({ value, recommended }) =>
       `Thinner than ${n(recommended)} mm (${n(value)} mm now): the model will be built, but check that your printer can print such a wall.`,
     W_EXPERIMENTAL_PROFILE: () =>
@@ -356,7 +388,11 @@ export default {
     hubWall: "Hub wall at its thinnest",
     inscribed: "Inscribed diameter",
     inscribedFlats: "Inscribed diameter, across the flats",
-    keyway: "From the bore wall to the keyway bottom, d + t"
+    keyway: "From the bore wall to the keyway bottom, d + t",
+    rackLength: "Rack length",
+    rackHeight: "Overall height, to the tooth tips",
+    rackBody: "Body under the tooth roots",
+    rackPitch: (inclined) => inclined ? "Pitch along the rack, πm/cos β" : "Pitch, πm"
   },
 
   drawings: {
@@ -378,7 +414,11 @@ export default {
     hubCloseUp: "hub close up, to scale",
     schematicSpokes: "spokes schematic: the fillets do not fit",
     spokeSection: "to scale, spokes cut along a spoke",
-    transverseSection: "transverse section, to scale"
+    transverseSection: "transverse section, to scale",
+    rackProfile: "Rack from the side",
+    rackFace: "Rack from the teeth",
+    rackProfileTag: "to scale, the whole length",
+    rackFaceTag: "to scale, tooth lines along the tips"
   },
 
   page: {

@@ -3,10 +3,12 @@ import { boreExtents } from "./contours.js";
 import { bevelGeometry, MAX_CONE_ANGLE } from "./bevel.js";
 import { gearGeometry } from "./involute.js";
 import { GEAR_KINDS, HELICES, PART_KINDS, rimFields, rimRadii, rimSizePath, rimSurface } from "./rims.js";
+import { rackGeometry } from "./rack.js";
 import { planTapers } from "./taper.js";
 
 const SCHEMA_VERSION = 6;
 const ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim", "flanges", "web", "hub", "bore", "generation"];
+const RACK_ROOT_FIELDS = ["schemaVersion", "kind", "units", "rim"]; // no axis: no flanges, web, hub or bore, and no arcs to mesh
 const OPTIONAL_ROOT_FIELDS = ["generator"]; // the program that wrote the file; not geometry, dropped on normalization
 const FLANGES_FIELDS = ["lower", "upper"];
 const FLANGE_FIELDS = ["axialThickness", "radialExtension"];
@@ -31,6 +33,7 @@ const DEGREE = Math.PI / 180;
 const MAX_BEVEL_LENGTH = 1 / 2;
 const USUAL_BEVEL_LENGTH = 1 / 3;
 const BEVEL_CONE_PATHS = ["/rim/mateToothCount", "/rim/shaftAngle", "/rim/toothCount"];
+const MIN_RACK_BODY = 1; // mm under the tooth roots, as for a web
 
 export function validateDescription(original) {
   const diagnostics = [];
@@ -49,16 +52,20 @@ export function validateDescription(original) {
 
   // A structurally valid description is normalized even when relation rules fail:
   // ok stays false and no mesh is built, but a form can still draw the conflict.
-  const normalized = normalize(input);
-  const derived = derive(normalized);
-  validateRelations(normalized, derived, diagnostics);
-  addWarnings(normalized, derived, diagnostics);
+  const rack = input.kind === "rack";
+  const normalized = rack ? normalizeRack(input) : normalize(input);
+  const derived = rack ? deriveRack(normalized) : derive(normalized);
+  if (rack) checkRack(normalized, derived, diagnostics);
+  else {
+    validateRelations(normalized, derived, diagnostics);
+    addWarnings(normalized, derived, diagnostics);
+  }
   return {
     ok: !diagnostics.some((item) => item.severity === "error"),
     schemaVersion: SCHEMA_VERSION,
     normalized,
     derived,
-    anchors: buildAnchors(normalized, derived),
+    anchors: rack ? rackAnchors(derived) : buildAnchors(normalized, derived),
     diagnostics
   };
 }
@@ -174,7 +181,8 @@ function buildAnchors(input, derived) {
 }
 
 function validateStatic(input, diagnostics) {
-  exactObject(input, ROOT_FIELDS, "", diagnostics, OPTIONAL_ROOT_FIELDS);
+  const rack = isRecord(input) && input.kind === "rack";
+  exactObject(input, rack ? RACK_ROOT_FIELDS : ROOT_FIELDS, "", diagnostics, OPTIONAL_ROOT_FIELDS);
   if (isRecord(input) && Object.hasOwn(input, "generator") && typeof input.generator !== "string") {
     schemaError(diagnostics, "/generator", "type", { type: "string" });
   }
@@ -187,13 +195,15 @@ function validateStatic(input, diagnostics) {
   } else if (exactObject(input.rim, rimFields(input.kind, input.rim), "/rim", diagnostics)) {
     if (input.kind === "idlerPulley") {
       numberRange(input.rim.outerDiameter, 5, 150, "/rim/outerDiameter", diagnostics);
-    } else if (GEAR_KINDS.includes(input.kind)) {
+    } else if (GEAR_KINDS.includes(input.kind) || rack) {
       numberRange(input.rim.module, 0.3, 10, "/rim/module", diagnostics);
-      integerRange(input.rim.toothCount, 6, 200, "/rim/toothCount", diagnostics);
+      // a rack is as long as its teeth: two make the shortest piece to join
+      integerRange(input.rim.toothCount, rack ? 2 : 6, 200, "/rim/toothCount", diagnostics);
       numberRange(input.rim.pressureAngle, 14.5, 30, "/rim/pressureAngle", diagnostics);
-      numberRange(input.rim.profileShift, -1, 1, "/rim/profileShift", diagnostics);
+      // a shifted rack is only a higher one: the pitch height says it
+      if (!rack) numberRange(input.rim.profileShift, -1, 1, "/rim/profileShift", diagnostics);
       numberRange(input.rim.backlash, 0, 1, "/rim/backlash", diagnostics);
-      if (input.kind === "gear") {
+      if (input.kind !== "bevelGear") {
         enumeration(input.rim.helix, HELICES, "/rim/helix", diagnostics);
         if (input.rim.helix !== "none") numberRange(input.rim.helixAngle, -45, 45, "/rim/helixAngle", diagnostics);
       } else {
@@ -205,8 +215,10 @@ function validateStatic(input, diagnostics) {
       integerRange(input.rim.toothCount, 14, 120, "/rim/toothCount", diagnostics);
     }
     numberRange(input.rim.width, 2, 50, "/rim/width", diagnostics);
-    numberRange(input.rim.radialThickness, 1, 25, "/rim/radialThickness", diagnostics);
+    if (rack) numberRange(input.rim.pitchHeight, 1, 100, "/rim/pitchHeight", diagnostics);
+    else numberRange(input.rim.radialThickness, 1, 25, "/rim/radialThickness", diagnostics);
   }
+  if (rack) return;
   if (exactObject(input.flanges, FLANGES_FIELDS, "/flanges", diagnostics)) {
     for (const side of FLANGES_FIELDS) {
       // a flange past the tooth tips would stop the mating gear
@@ -495,6 +507,62 @@ function derive(input) {
       min: [-radialBound, -radialBound, Math.min(hubLowerZ, faceLowerZ)],
       max: [radialBound, radialBound, Math.max(hubUpperZ, faceUpperZ)]
     }
+  };
+}
+
+/** Sizes of a rack from the back (y = 0) and its extent, see rack.js. */
+function deriveRack(input) {
+  const rack = rackGeometry(input.rim);
+  const halfWidth = input.rim.width / 2;
+  return {
+    // pitch and module along the rack: the transverse ones of inclined teeth
+    pitch: rack.pitch,
+    transverseModule: rack.transverseModule,
+    length: rack.length,
+    pitchHeight: rack.pitchHeight,
+    rootHeight: rack.rootHeight,
+    tipHeight: rack.tipHeight,
+    fullTipHeight: rack.fullTipHeight,
+    bounds: {
+      min: [-rack.length / 2, 0, -halfWidth],
+      max: [rack.length / 2, rack.tipHeight, halfWidth]
+    }
+  };
+}
+
+function rackAnchors(derived) {
+  return {
+    length: derived.length,
+    levels: { back: 0, root: derived.rootHeight, pitch: derived.pitchHeight, tip: derived.tipHeight }
+  };
+}
+
+/** Relation rules and warnings of a rack: its teeth, as a gear's, and the body under them. */
+function checkRack(input, derived, diagnostics) {
+  const rack = rackGeometry(input.rim);
+  if (rack.thin) {
+    // the normal thickness, across the tooth, as the module and the thinning are given
+    diagnostics.push(diagnostic("E_GEAR_TOOTH_THIN", "error", "description", ["/rim/backlash", "/rim/module"],
+      { thickness: rack.thickness * Math.cos(rack.helix) }));
+  }
+  if (derived.rootHeight < MIN_RACK_BODY) {
+    diagnostics.push(diagnostic("E_RACK_BODY", "error", "description", ["/rim/pitchHeight", "/rim/module"],
+      { thickness: derived.rootHeight, minimum: MIN_RACK_BODY, minimumPitchHeight: MIN_RACK_BODY + derived.pitchHeight - derived.rootHeight }));
+  } else if (derived.rootHeight < THIN_FEATURE) {
+    diagnostics.push(thin("/rim/pitchHeight", derived.rootHeight));
+  }
+  if (rack.pointed) {
+    diagnostics.push(diagnostic("W_RACK_POINTED", "warning", "build", ["/rim/backlash", "/rim/pressureAngle"],
+      { tipHeight: rack.tipHeight, fullTipHeight: rack.fullTipHeight }));
+  }
+}
+
+function normalizeRack(input) {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    kind: "rack",
+    units: "mm",
+    rim: Object.fromEntries(rimFields("rack", input.rim).map((field) => [field, input.rim[field]]))
   };
 }
 

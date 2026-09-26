@@ -2,7 +2,7 @@
 
 Site: **https://apus-software.com/gears/** · [Русский](README.ru.md)
 
-A browser generator of power transmission parts for 3D printing: a GT2 timing pulley, a smooth pulley (a tensioner or a belt idler), an involute gear with straight, helical or herringbone teeth, and a straight bevel gear for shafts at an angle. Parameters are set in groups with explanatory drawings, and the part is built locally in a background thread of the browser. The result is shown in 3D and downloaded as STL. The interface is in English, with a Russian page at `index_ru.html`.
+A browser generator of power transmission parts for 3D printing: a GT2 timing pulley, a smooth pulley (a tensioner or a belt idler), an involute gear with straight, helical or herringbone teeth, a straight bevel gear for shafts at an angle, and a gear rack with the teeth of a gear on parallel shafts. Parameters are set in groups with explanatory drawings, and the part is built locally in a background thread of the browser. The result is shown in 3D and downloaded as STL. The interface is in English, with a Russian page at `index_ru.html`.
 
 No generation server is needed: the JavaScript core runs both in the browser and in Node.js. There are no external dependencies and no build step; only Node.js 20 or newer is needed, for the local server, the command line and the tests.
 
@@ -33,6 +33,7 @@ The workflow: on the Presets page you choose a part kind and a ready-made preset
 | Bevel gear: module of the large end `m` / tooth count `N` | 0.3…10 mm / 6…200 | 2 / 20 |
 | Bevel gear: teeth of the mating gear `N₂` / shaft angle `Σ` | 6…200 / 30…150° | 30 / 90 |
 | Width of the toothed part, gear rim or smooth rim `W` | 2…50 mm | 6 |
+| Rack: tooth count `N` / height to the pitch line `H_p` | 2…200 / 1…100 mm | 20 / 8 |
 | Rim under the grooves or teeth, smooth rim wall `T_r` (radial) | 1…25 mm | 2 |
 | Pulley flange: thickness / extension beyond the tips or the rim surface | 0.4…5 / 0.5…10 mm | 1 / 1 |
 | Web or spokes: thinning / alignment / offset | 0…59 mm / bottom, centre, top / −60…60 mm | 0 / bottom / 0 |
@@ -48,7 +49,7 @@ The workflow: on the Presets page you choose a part kind and a ready-made preset
 
 Besides the ranges, related constraints apply: tooth thickness after thinning and the space between teeth, the hub wall at its thinnest point, room between the hub and the rim, a web at least 1 mm thick, the web within the part, the hub along the whole height of the web, fillets and the spoke layout. A violation is explained next to the field. A gear warns about root undercut at small tooth counts and about pointed teeth. A bevel gear limits its pitch cone to 80° and its tooth length along the cone to half the cone distance, and advises a third. The sign of the helix angle sets the hand: plus is right-hand, minus is left-hand; the two gears of a pair have opposite signs. Cones that do not fit between the hub and the rim at the web get shorter and keep their angles.
 
-The description format is `schemaVersion: 6`: the `kind` field (`timingPulley`, `idlerPulley`, `gear` or `bevelGear`) selects the rim. The web and the hub are measured from the faces of the part — the outer faces of the flanges, or the rim ends without a flange. By default the web is aligned to the bottom, and the part lies on the bed on its flat base. Files of earlier versions open and read with the same geometry and are saved as version 6. The full specification is [`docs/contract.md`](docs/contract.md), geometry and assumptions are in [`docs/geometry.md`](docs/geometry.md), the schema is [`schemas/pulley-v6.schema.json`](schemas/pulley-v6.schema.json); the documents are in Russian.
+The description format is `schemaVersion: 6`: the `kind` field (`timingPulley`, `idlerPulley`, `gear`, `bevelGear` or `rack`) selects the rim; a rack has the rim alone, with no flanges, web, hub or bore. The web and the hub are measured from the faces of the part — the outer faces of the flanges, or the rim ends without a flange. By default the web is aligned to the bottom, and the part lies on the bed on its flat base. Files of earlier versions open and read with the same geometry and are saved as version 6. The full specification is [`docs/contract.md`](docs/contract.md), geometry and assumptions are in [`docs/geometry.md`](docs/geometry.md), the schema is [`schemas/pulley-v6.schema.json`](schemas/pulley-v6.schema.json); the documents are in Russian.
 
 ## Command line
 
@@ -96,7 +97,7 @@ The build puts a static site into `dist/`: both pages at the root, the modules, 
 ## Known limitations
 
 - The `gt2-2mm-experimental-v1` profile is experimental: the pitch and the outside diameter match the catalogue, the groove shape is confirmed by printing only. Belt fit on test pulleys has not been checked.
-- Gears are built without a root fillet, and real undercut is not modelled: below the base circle the flank runs radially, and a warning is shown for small tooth counts. Gear pairs — centre distance and meshing — are not checked; keeping the same module, pressure angle and helix angle magnitude in a pair is up to the user. Meshing of printed gears has not been tested.
+- Gears are built without a root fillet, and real undercut is not modelled: below the base circle the flank runs radially, and a warning is shown for small tooth counts. Gear pairs — centre distance and meshing — are not checked; keeping the same module, pressure angle and helix angle magnitude in a pair is up to the user. A rack is set with the same module, pressure angle and helix angle as its gear, the helix angle of the opposite sign; its ends are cut in the middle of a space so racks can be laid end to end. Racks have no mounting holes yet. Meshing of printed gears and racks has not been tested.
 - Bevel gears have straight teeth only, by Tredgold's approximation with the tooth depth tapering to the apex; spiral bevel teeth and a constant tip clearance are not supported. The large end is a flat face through its tip circle rather than a back cone. The mating gear is set by its tooth count; the same tooth length along the cone in a pair is up to the user.
 - No load rating is claimed. Printer hole compensation is not built into the model: put the fit clearance into the bore diameter.
 - The upper flange is printed as an overhang above the grooves, and its lower face comes out rough.

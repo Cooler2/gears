@@ -13,6 +13,7 @@
 import { circleSegmentCount } from "../core/contours.js";
 import { bevelGeometry } from "../core/bevel.js";
 import { buildGearContour, gearGeometry, gearToothOutline } from "../core/involute.js";
+import { rackGeometry, rackSection, rackShift } from "../core/rack.js";
 import { helixTurn } from "../core/rims.js";
 import { taperBreaks, taperedRadius } from "../core/taper.js";
 import { FIELD_BY_PATH, fieldLabel, fieldUnit } from "./fields.js";
@@ -121,6 +122,8 @@ function part(ctx, group, d, { path = null, extra = "" } = {}) {
  * For the bore group it is a detail: only a circle around the hub, at a larger scale.
  */
 export function renderPlan(model, ctx) {
+  // a rack has no axis: its profile takes the place of the cross section
+  if (model.normalized.kind === "rack") return renderRackProfile(model, ctx);
   const { plan, normalized, derived } = model;
   const r = plan.radii;
   const flangeRadius = Math.max(plan.flangeRadii.lower ?? 0, plan.flangeRadii.upper ?? 0);
@@ -305,6 +308,7 @@ function spokeDimensions(ctx, plan, web, u, outer) {
  * pressure angle are larger than the normal ones the fields hold.
  */
 export function renderTooth(model, ctx) {
+  if (model.normalized.kind === "rack") return renderRackTooth(model, ctx);
   // a bevel gear shows its virtual gear: the teeth of the large end unrolled from the back cone
   const bevel = model.normalized.kind === "bevelGear";
   const rim = bevel ? bevelGeometry(model.normalized.rim).virtualRim : model.normalized.rim;
@@ -542,6 +546,8 @@ export function renderCone(model, ctx) {
 
 /** Axial section through the axis (XZ plane), both halves; spokes are cut along a spoke. */
 export function renderSection(model, ctx) {
+  // the toothed face of a rack takes the place of the axial section
+  if (model.normalized.kind === "rack") return renderRackFace(model, ctx);
   const { normalized, derived, anchors } = model;
   const r = anchors.radii;
   const z = anchors.zLevels;
@@ -726,6 +732,184 @@ function taperDimensions(ctx, web, derived, z, u, { top, bottom }) {
       labelMarkup(path, value, add(labelAt, [outward * 0.3 * u, 0]), anchor)));
   }
   return out;
+}
+
+// -------------------------------------------------------------- rack views
+
+/**
+ * The rack from the side, along Z: its section at the mid-plane, the whole length, with the
+ * back down. The pitch line is dash-dotted; H_p runs from the back to it.
+ */
+function renderRackProfile(model, ctx) {
+  const { rim } = model.normalized;
+  const { length, pitch, pitchHeight, tipHeight } = model.derived;
+  const half = length / 2;
+  const u = Math.max(length, 4 * tipHeight) / 24;
+  const out = [part(ctx, "rim", polygonPath(rackSection(rim)))];
+  out.push(`<path class="pitch-line" d="M${P([-half - u, pitchHeight])}L${P([half + u, pitchHeight])}"/>`);
+
+  // N: a dot over every tooth, the label above the middle
+  const dots = Array.from({ length: rim.toothCount }, (_, k) => [-half + pitch * (k + 0.5), tipHeight + 0.5 * u]);
+  out.push(wrap(ctx, "/rim/toothCount", rim.toothCount,
+    dots.map((point) => `<path class="dim-dot" d="${circlePath(0.13 * u, point)}"/>`).join("") +
+    labelMarkup("/rim/toothCount", rim.toothCount, [0, tipHeight + 1.4 * u], "middle")));
+
+  // H_p left of the rack, from the back up to the pitch line
+  const column = -half - 1.5 * u;
+  out.push(dimension(ctx, "/rim/pitchHeight", {
+    u, a: [column, 0], b: [column, pitchHeight], value: rim.pitchHeight,
+    ext: [[[-half - 0.3 * u, 0], [column - 0.4 * u, 0]]],
+    label: [column - 0.7 * u, pitchHeight / 2], anchor: "end"
+  }));
+
+  const box = [-half - 7 * u, -(tipHeight + 2.5 * u), length + 9 * u, tipHeight + 3.5 * u];
+  return svgRoot(box, u, out.join(""), T.drawings.rackProfile);
+}
+
+/**
+ * The toothed face of the rack, seen from the teeth: the rack across, its width
+ * up, the centre lines of the teeth along their tips. From this side a right-hand
+ * rack has teeth rising to the right, as a right-hand gear seen from outside.
+ */
+function renderRackFace(model, ctx) {
+  const { rim } = model.normalized;
+  const { length, pitch } = model.derived;
+  const half = length / 2;
+  const halfWidth = rim.width / 2;
+  const u = Math.max(length, 1.4 * rim.width) / 19;
+  // +X of the model is to the left when the teeth face the viewer
+  const view = ([x, z]) => [-x, z];
+  const lineX = (tooth, z) => -half + pitch * (tooth + 0.5) + rackShift(rim, z);
+
+  const out = [part(ctx, "rim", rectPath(-half, -halfWidth, half, halfWidth), { path: "/rim/helix", extra: "part-teeth" })];
+  const levels = rim.helix === "herringbone" ? [-halfWidth, 0, halfWidth] : [-halfWidth, halfWidth];
+  const reach = Math.max(...levels.map((z) => Math.abs(rackShift(rim, z))));
+  const first = -Math.ceil(reach / pitch) - 1;
+  const last = rim.toothCount + Math.ceil(reach / pitch) + 1;
+  const lines = [];
+  for (let tooth = first; tooth <= last; tooth += 1) {
+    for (let index = 1; index < levels.length; index += 1) {
+      const piece = clipSegment([lineX(tooth, levels[index - 1]), levels[index - 1]], [lineX(tooth, levels[index]), levels[index]], half);
+      if (piece) lines.push(`M${P(view(piece[0]))}L${P(view(piece[1]))}`);
+    }
+  }
+  out.push(`<path class="tooth-line" d="${lines.join("")}"/>`);
+
+  // W right of the rack
+  const column = half + 1.5 * u;
+  out.push(dimension(ctx, "/rim/width", {
+    u, a: [column, -halfWidth], b: [column, halfWidth], value: rim.width,
+    ext: [[[half + 0.3 * u, -halfWidth], [column + 0.4 * u, -halfWidth]], [[half + 0.3 * u, halfWidth], [column + 0.4 * u, halfWidth]]],
+    label: [column + 0.7 * u, 0], anchor: "start"
+  }));
+
+  // β at the tooth nearest the middle, low enough for the arc to stay on the rack;
+  // on a herringbone above the mid-plane, clear of the kink
+  if (rim.helix !== "none") {
+    const level = rim.helix === "herringbone" ? 0.15 * halfWidth : -0.5 * halfWidth;
+    const tooth = Math.round((half - rackShift(rim, level)) / pitch - 0.5);
+    const point = view([lineX(tooth, level), level]);
+    const delta = rim.width / 48;
+    const tangent = unit(sub(view([lineX(tooth, level + delta), level + delta]), view([lineX(tooth, level - delta), level - delta])));
+    const radius = Math.min(0.7 * (halfWidth - level), 3 * u);
+    const arc = Array.from({ length: 9 }, (_, index) => add(point, mul(unit(add(mul([0, 1], 1 - index / 8), mul(tangent, index / 8))), radius)));
+    const arcPath = `M${arc.map(P).join("L")}`;
+    const labelAt = [point[0] + 2.5 * u, halfWidth + 1.5 * u];
+    out.push(wrap(ctx, "/rim/helixAngle", rim.helixAngle,
+      `<path class="dim-ext" d="M${P(point)}L${P(add(point, [0, radius + 0.8 * u]))}M${P(point)}L${P(add(point, mul(tangent, radius + 0.8 * u)))}"/>` +
+      `<path class="dim-line" d="${arcPath}"/><path class="dim-hit" d="${arcPath}"/>` +
+      `<path class="dim-ext" d="M${P(arc[4])}L${P(labelAt)}"/>` +
+      labelMarkup("/rim/helixAngle", rim.helixAngle, add(labelAt, [0.3 * u, 0]), "start")));
+  }
+
+  const box = [-half - 3 * u, -(halfWidth + 3 * u), length + 10 * u, rim.width + 6 * u];
+  return svgRoot(box, u, out.join(""), T.drawings.rackFace);
+}
+
+/** The part of the segment a–b ([x, z]) with |x| ≤ half, null when there is none. */
+function clipSegment(a, b, half) {
+  let [from, to] = [0, 1];
+  const dx = b[0] - a[0];
+  for (const [limit, sign] of [[-half, 1], [half, -1]]) {
+    // sign·(a + t·dx − limit) ≥ 0
+    const start = sign * (a[0] - limit);
+    const rate = sign * dx;
+    if (Math.abs(rate) < 1e-12) {
+      if (start < 0) return null;
+    } else if (rate > 0) from = Math.max(from, -start / rate);
+    else to = Math.min(to, -start / rate);
+  }
+  if (to - from < 1e-9) return null;
+  const at = (t) => [a[0] + t * dx, a[1] + t * (b[1] - a[1])];
+  return [at(from), at(to)];
+}
+
+/**
+ * A few rack teeth around the middle one, at a larger scale, for the tooth sizes;
+ * the rack section, where inclined teeth have the transverse pitch and pressure
+ * angle, larger than the normal ones the fields hold.
+ */
+function renderRackTooth(model, ctx) {
+  const { rim } = model.normalized;
+  const rack = rackGeometry(rim);
+  const nominal = rackGeometry({ ...rim, backlash: 0 });
+  const inclined = rack.helix !== 0;
+  const m = rim.module;
+  const { pitch, pitchHeight, rootHeight } = rack;
+  const u = pitch / 8;
+  const halfWidth = 1.3 * pitch;
+  const top = rack.fullTipHeight + 0.6 * m;
+  const bottom = rootHeight - 0.6 * m;
+  const frame = rectPath(-halfWidth, bottom, halfWidth, top);
+  /** Tooth line of the rack with a tooth centred on x = 0. */
+  const toothLine = ({ tipHalf, tipHeight, halfThickness }) => [-2, -1, 0, 1, 2].flatMap((k) => [
+    [k * pitch - halfThickness(rootHeight), rootHeight], [k * pitch - tipHalf, tipHeight],
+    [k * pitch + tipHalf, tipHeight], [k * pitch + halfThickness(rootHeight), rootHeight]
+  ]);
+  const body = [[-2.5 * pitch, bottom - m], [-2.5 * pitch, rootHeight], ...toothLine(rack), [2.5 * pitch, rootHeight], [2.5 * pitch, bottom - m]];
+  const inside = [part(ctx, "rim", polygonPath(body)), `<path class="pitch-line" d="M${P([-halfWidth, pitchHeight])}L${P([halfWidth, pitchHeight])}"/>`];
+  if (rim.backlash > 0) {
+    // the middle tooth without thinning, dashed
+    inside.push(`<path class="nominal-line" d="M${toothLine(nominal).slice(8, 12).map(P).join("L")}"/>`);
+  }
+  const out = [`<g class="detail" clip-path="url(#tooth-detail)">${inside.join("")}</g>`, `<path class="detail-edge" d="${frame}"/>`];
+
+  // m: the pitch between the centres of two teeth, above the frame
+  const level = top + 1.3 * u;
+  const pitchMiddle = [pitch / 2, level];
+  out.push(dimension(ctx, "/rim/module", {
+    u, a: [0, level], b: [pitch, level], value: m,
+    ext: [0, pitch].map((x) => [[x, rack.fullTipHeight + 0.3 * u], [x, level + 0.4 * u]]),
+    label: add(pitchMiddle, [0, 1.1 * u]), anchor: "middle",
+    extra: `<text class="note" x="${f(pitchMiddle[0])}" y="${f(-(pitchMiddle[1] + 2.2 * u))}" text-anchor="middle">${T.drawings.pitch(inclined)} = ${escapeHtml(formatNumber(pitch))}</text>`
+  }));
+
+  // α: at the pitch point of the left flank, between the pitch line and the flank normal
+  const point = [-rack.thickness / 2, pitchHeight];
+  const action = unit([-1, Math.tan(rack.transversePressureAngle)]);
+  const tangent = [-1, 0];
+  const arc = Array.from({ length: 9 }, (_, index) => add(point, mul(unit(add(mul(tangent, 1 - index / 8), mul(action, index / 8))), 2.2 * u)));
+  const arcPath = `M${arc.map(P).join("L")}`;
+  const angleLabel = [-halfWidth - 0.8 * u, arc[4][1] + 1.2 * u];
+  out.push(wrap(ctx, "/rim/pressureAngle", rim.pressureAngle,
+    `<path class="dim-ext" d="M${P(add(point, mul(action, -2 * u)))}L${P(add(point, mul(action, 3 * u)))}"/>` +
+    `<path class="dim-line" d="${arcPath}"/><path class="dim-hit" d="${arcPath}"/>` +
+    `<path class="dim-ext" d="M${P(arc[4])}L${P(angleLabel)}"/>` +
+    labelMarkup("/rim/pressureAngle", rim.pressureAngle, add(angleLabel, [-0.3 * u, 0]), "end") +
+    (inclined ? `<text class="note" x="${f(angleLabel[0] - 0.3 * u)}" y="${f(-(angleLabel[1] - 1.2 * u))}" text-anchor="end">${T.drawings.transverse} ${escapeHtml(formatNumber(rack.transversePressureAngle * 180 / Math.PI))}</text>` : "")));
+
+  // j: the thinning at the pitch line on the right flank, against the dashed tooth
+  const flank = [rack.thickness / 2, pitchHeight];
+  const nominalFlank = [nominal.thickness / 2, pitchHeight];
+  const thinningLabel = [halfWidth + 0.8 * u, pitchHeight - 1.6 * u];
+  out.push(dimension(ctx, "/rim/backlash", {
+    u, a: flank, b: nominalFlank, value: rim.backlash,
+    leader: [nominalFlank, thinningLabel], label: add(thinningLabel, [0.3 * u, 0]), anchor: "start"
+  }));
+
+  const defs = `<clipPath id="tooth-detail"><path d="${frame}"/></clipPath>`;
+  const box = [-halfWidth - 7 * u, -(level + 3.2 * u), 2 * halfWidth + 14 * u, level + 3.2 * u - bottom + u];
+  return svgRoot(box, u, out.join(""), T.drawings.tooth, defs);
 }
 
 // --------------------------------------------------------------- chord view

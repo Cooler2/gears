@@ -1,6 +1,7 @@
 // Gears — (c) 2026 Ivan Polyacov (ivan@apus-software.com), Elastic License 2.0, see LICENSE
 import { diagnostic, validateDescription } from "./parameters.js";
 import { buildPulleyMesh } from "./mesh.js";
+import { buildRackMesh } from "./rack.js";
 import { MeshBuildError } from "./mesh-builder.js";
 import { verifyMesh } from "./verify-mesh.js";
 
@@ -12,7 +13,7 @@ export function generatePulley(input) {
 
   let built;
   try {
-    built = buildPulleyMesh(result.normalized, result.derived);
+    built = (result.normalized.kind === "rack" ? buildRackMesh : buildPulleyMesh)(result.normalized, result.derived);
   } catch (error) {
     const known = error instanceof MeshBuildError;
     const code = known ? error.code : "E_BUILD_INTERNAL";

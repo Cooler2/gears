@@ -7,6 +7,11 @@ export const isGear = (description) => description?.kind === "gear" || descripti
 export const isBevel = (description) => description?.kind === "bevelGear";
 /** A gear whose teeth may be helical. */
 export const isParallel = (description) => description?.kind === "gear";
-export const isInclined = (description) => isParallel(description) && description.rim?.helix !== "none";
+export const isRack = (description) => description?.kind === "rack";
+// gears and a rack share the involute tooth fields
+export const isInvolute = (description) => isGear(description) || isRack(description);
+// a rack meshes with a parallel gear, so its teeth may be inclined too
+export const isInclined = (description) => (isParallel(description) || isRack(description)) && description.rim?.helix !== "none";
 export const isSpokes = (description) => description.web?.type === "spokes";
-export const hasWeb = (description) => description.web?.type !== "none";
+// a rack has no axis: no web, hub or bore
+export const hasWeb = (description) => !isRack(description) && description.web?.type !== "none";

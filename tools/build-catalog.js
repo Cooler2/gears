@@ -53,7 +53,17 @@ async function buildEntry(group, file) {
   const stl = join(outDir, `${name}.stl`);
   await writeFile(stl, exported.data);
   const { normalized, derived } = result;
-  const flangeDiameters = [normalized.flanges.lower, normalized.flanges.upper]
+  const rack = normalized.kind === "rack";
+  // a rack has no axis: its sizes along the bar in place of the diameters
+  const dimensions = rack ? {
+    toothCount: normalized.rim.toothCount,
+    module: normalized.rim.module,
+    length: derived.length,
+    pitchHeight: derived.pitchHeight,
+    tipHeight: derived.tipHeight,
+    width: normalized.rim.width
+  } : null;
+  const flangeDiameters = rack ? [] : [normalized.flanges.lower, normalized.flanges.upper] = [normalized.flanges.lower, normalized.flanges.upper]
     .map((flange) => flange ? 2 * (derived.outsideRadius + flange.radialExtension) : null);
   return Object.assign(entry, {
     stl,
@@ -63,7 +73,7 @@ async function buildEntry(group, file) {
     volume: result.verification.signedVolume,
     placementTranslation: exported.placementTranslation,
     exportedBounds: exported.exportedBounds,
-    dimensions: {
+    dimensions: dimensions ?? {
       toothCount: normalized.rim.toothCount,
       outsideDiameter: 2 * derived.outsideRadius,
       grooveRootDiameter: derived.grooveRootRadius === null ? null : 2 * derived.grooveRootRadius,

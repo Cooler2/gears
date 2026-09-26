@@ -2,19 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gears.local/schemas/pulley-v6.schema.json",
   "title": "Gears pulley description, version 6",
-  "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley, an involute gear with straight, helical or herringbone teeth, or a straight bevel gear. Cross-field geometry rules are defined in docs/contract.md.",
+  "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley, an involute gear with straight, helical or herringbone teeth, a straight bevel gear or a gear rack. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schemaVersion",
     "kind",
     "units",
-    "rim",
-    "flanges",
-    "web",
-    "hub",
-    "bore",
-    "generation"
+    "rim"
   ],
   "properties": {
     "schemaVersion": {
@@ -22,8 +17,8 @@
       "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only, version 3 added the idler pulley and the spur gear but placed the web by thickness and mid-plane and measured hub extensions from the rim ends; readers upgrade them. Version 4 placed the web and the hub against the faces of the part. Version 5 renames spurGear to gear and adds helical teeth; a version 4 gear gets rim.helix \"none\". Version 6 adds web.hubTaper and web.rimTaper; a version 5 web gets 0 for both, a cylindrical hub and rim."
     },
     "kind": {
-      "enum": ["timingPulley", "idlerPulley", "gear", "bevelGear"],
-      "description": "Part kind; it selects the rim. Flanges (absent on gears), web, hub and bore are shared."
+      "enum": ["timingPulley", "idlerPulley", "gear", "bevelGear", "rack"],
+      "description": "Part kind; it selects the rim. Flanges (absent on gears), web, hub, bore and generation are shared by the parts that turn on an axis; a rack has the rim alone."
     },
     "units": {
       "const": "mm",
@@ -34,7 +29,8 @@
         { "$ref": "#/$defs/timingRim" },
         { "$ref": "#/$defs/idlerRim" },
         { "$ref": "#/$defs/gearRim" },
-        { "$ref": "#/$defs/bevelRim" }
+        { "$ref": "#/$defs/bevelRim" },
+        { "$ref": "#/$defs/rackRim" }
       ]
     },
     "flanges": {
@@ -67,6 +63,20 @@
     }
   },
   "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "rack" } } },
+      "then": {
+        "properties": {
+          "rim": { "$ref": "#/$defs/rackRim" },
+          "flanges": false,
+          "web": false,
+          "hub": false,
+          "bore": false,
+          "generation": false
+        }
+      },
+      "else": { "required": ["flanges", "web", "hub", "bore", "generation"] }
+    },
     {
       "if": { "properties": { "kind": { "const": "timingPulley" } } },
       "then": { "properties": { "rim": { "$ref": "#/$defs/timingRim" } } }
@@ -247,6 +257,49 @@
         "backlash": { "$ref": "#/$defs/gearRim/properties/backlash" },
         "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
         "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }
+      }
+    },
+    "rackRim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "toothCount", "pressureAngle", "backlash", "helix", "width", "pitchHeight"],
+      "if": { "properties": { "helix": { "const": "none" } } },
+      "then": { "not": { "required": ["helixAngle"] } },
+      "else": { "required": ["helixAngle"] },
+      "description": "Teeth of the basic rack along a straight bar: X along the rack, the back at y = 0, the teeth towards +Y, the width along Z from -width/2 to +width/2. Both ends are cut square at the middle of a space at the mid-plane, so racks put end to end keep the pitch.",
+      "properties": {
+        "module": {
+          "$ref": "#/$defs/gearRim/properties/module",
+          "description": "Normal module m in mm, across the tooth: the pitch along the rack is π·m/cos β. The mating gear has the same module, pressure angle and helix angle of the opposite sign."
+        },
+        "toothCount": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 200,
+          "default": 20,
+          "description": "Number of teeth; the rack is toothCount pitches long."
+        },
+        "pressureAngle": { "$ref": "#/$defs/gearRim/properties/pressureAngle" },
+        "backlash": {
+          "$ref": "#/$defs/gearRim/properties/backlash",
+          "description": "Thinning of every tooth along the pitch line, mm, across the tooth for inclined teeth."
+        },
+        "helix": { "$ref": "#/$defs/gearRim/properties/helix" },
+        "helixAngle": {
+          "$ref": "#/$defs/gearRim/properties/helixAngle",
+          "description": "Angle β between the teeth and the Z axis, degrees; present only when helix is not none. Positive is right-hand, as for a gear: a section at height z is the mid-plane one moved by -z·tan β along X (by |z|·tan β for a herringbone). A rack meshes with a gear of the opposite sign."
+        },
+        "width": {
+          "$ref": "#/$defs/rimPlacement/properties/width",
+          "description": "Width of the rack across the teeth, along Z, centred on z=0: the face width of the mating gear."
+        },
+        "pitchHeight": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 8,
+          "description": "Height from the back to the pitch line H_p. The axis of a mating gear lies at H_p plus its pitch radius (plus x·m for a shifted gear) from the back. The body under the tooth roots, H_p − 1.25·m, keeps at least 1 mm."
+        }
       }
     },
     "flange": {

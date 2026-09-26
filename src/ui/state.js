@@ -14,6 +14,24 @@ const BORE_EXTRAS = { round: [], polygon: ["sides"], dFlat: ["flatDistance"], ke
 
 export function defaultDescription(schema, kind = "timingPulley") {
   const value = (definition, property) => schema.$defs[definition].properties[property].default;
+  if (kind === "rack") {
+    // the teeth of a gear, as long as its tooth count, on a bar of the pitch height
+    const teeth = Object.fromEntries(["module", "pressureAngle", "backlash", "helix"].map((field) => [field, value("gearRim", field)]));
+    return {
+      schemaVersion: schema.properties.schemaVersion.const,
+      kind,
+      units: "mm",
+      rim: {
+        module: teeth.module,
+        toothCount: value("rackRim", "toothCount"),
+        pressureAngle: teeth.pressureAngle,
+        backlash: teeth.backlash,
+        helix: teeth.helix,
+        width: value("rimPlacement", "width"),
+        pitchHeight: value("rackRim", "pitchHeight")
+      }
+    };
+  }
   const rims = {
     timingPulley: () => ({ profile: schema.$defs.timingRim.properties.profile.const, toothCount: value("timingRim", "toothCount") }),
     idlerPulley: () => ({ outerDiameter: value("idlerRim", "outerDiameter") }),
@@ -121,8 +139,10 @@ export function setHelix(state, helix) {
 export function loadDescription(state, description) {
   const next = { description: structuredClone(description), remembered: structuredClone(state.remembered) };
   const { web, flanges, bore, rim } = description;
-  for (const field of BORE_EXTRAS[bore.shape] ?? []) next.remembered.bore[field] = bore[field];
   if (Number.isFinite(rim.helixAngle)) next.remembered.helixAngle = rim.helixAngle;
+  // a rack has nothing but its teeth
+  if (!bore) return next;
+  for (const field of BORE_EXTRAS[bore.shape] ?? []) next.remembered.bore[field] = bore[field];
   if (web.type === "spokes") next.remembered.spokes = { count: web.count, width: web.width, filletRadius: web.filletRadius };
   if (web.type !== "none") next.remembered.placement = Object.fromEntries(WEB_PLACEMENT.map((field) => [field, web[field]]));
   for (const side of ["lower", "upper"]) {
@@ -131,8 +151,14 @@ export function loadDescription(state, description) {
   return next;
 }
 
+/** Whether a new part can take the hub and the bore of the previous one: a rack has neither. */
+export function canKeepShaft(state, previous) {
+  return Boolean(state.description.hub && previous.description.hub);
+}
+
 /** The hub and the bore of `previous` put into `state`: a new part for the same shaft. */
 export function keepShaft(state, previous) {
+  if (!canKeepShaft(state, previous)) return state;
   const next = structuredClone(state);
   next.description.hub = structuredClone(previous.description.hub);
   next.description.bore = structuredClone(previous.description.bore);

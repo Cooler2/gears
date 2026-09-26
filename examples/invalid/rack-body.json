@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 6,
+  "kind": "rack",
+  "units": "mm",
+  "rim": {
+    "module": 3,
+    "toothCount": 10,
+    "pressureAngle": 20,
+    "backlash": 0.1,
+    "helix": "none",
+    "width": 10,
+    "pitchHeight": 4
+  }
+}

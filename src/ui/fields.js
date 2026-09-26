@@ -8,26 +8,28 @@
 // `schema: [def, property]` points at $defs[def].properties[property].
 
 import { T, resolve } from "./locale.js";
-import { hasWeb, isBevel, isGear, isIdler, isInclined, isParallel, isSpokes } from "./part.js";
+import { hasWeb, isBevel, isGear, isIdler, isInclined, isInvolute, isParallel, isRack, isSpokes } from "./part.js";
 
 // titles and texts come from the page language when asked for
 const kind = (id, extra = {}) => ({ id, ...extra, get title() { return T.kinds[id].title; }, get text() { return T.kinds[id].text; } });
 
-export const KINDS = [kind("timingPulley", { experimental: true }), kind("idlerPulley"), kind("gear"), kind("bevelGear")];
+export const KINDS = [kind("timingPulley", { experimental: true }), kind("idlerPulley"), kind("gear"), kind("bevelGear"), kind("rack")];
 
 export function kindOf(description) {
   return KINDS.find(({ id }) => id === description?.kind) ?? KINDS[0];
 }
 
+// a rack is its teeth alone: straight, with no axis and no arcs to mesh
+const turns = (description) => !isRack(description);
 export const GROUPS = [
   { id: "presets" },
   { id: "rim" },
   // flanges past the tooth tips would stop the mating gear
-  { id: "flanges", applies: (description) => !isGear(description) },
-  { id: "web" },
-  { id: "hub" },
-  { id: "bore" },
-  { id: "generation" }
+  { id: "flanges", applies: (description) => turns(description) && !isGear(description) },
+  { id: "web", applies: turns },
+  { id: "hub", applies: turns },
+  { id: "bore", applies: turns },
+  { id: "generation", applies: turns }
 ];
 
 /** Groups of the kind, the variants page included. */
@@ -44,11 +46,11 @@ const hasFlange = (side) => (description) => Boolean(description.flanges?.[side]
 
 export const FIELDS = [
   {
-    path: "/rim/module", group: "rim", schema: (description) => [isBevel(description) ? "bevelRim" : "gearRim", "module"], applies: isGear,
+    path: "/rim/module", group: "rim", schema: (description) => [isBevel(description) ? "bevelRim" : "gearRim", "module"], applies: isInvolute,
     symbol: "m", unit: "mm"
   },
   {
-    path: "/rim/toothCount", group: "rim", schema: (description) => [isBevel(description) ? "bevelRim" : isGear(description) ? "gearRim" : "timingRim", "toothCount"],
+    path: "/rim/toothCount", group: "rim", schema: (description) => [isBevel(description) ? "bevelRim" : isGear(description) ? "gearRim" : isRack(description) ? "rackRim" : "timingRim", "toothCount"],
     applies: (description) => !isIdler(description),
     symbol: "N"
   },
@@ -61,7 +63,7 @@ export const FIELDS = [
     symbol: "Σ", unit: "deg"
   },
   {
-    path: "/rim/pressureAngle", group: "rim", schema: ["gearRim", "pressureAngle"], applies: isGear,
+    path: "/rim/pressureAngle", group: "rim", schema: ["gearRim", "pressureAngle"], applies: isInvolute,
     symbol: "α", unit: "deg"
   },
   {
@@ -69,11 +71,11 @@ export const FIELDS = [
     symbol: "x"
   },
   {
-    path: "/rim/backlash", group: "rim", schema: ["gearRim", "backlash"], applies: isGear,
+    path: "/rim/backlash", group: "rim", schema: ["gearRim", "backlash"], applies: isInvolute,
     symbol: "j", unit: "mm"
   },
   {
-    path: "/rim/helix", group: "rim", kind: "choice", applies: isParallel,
+    path: "/rim/helix", group: "rim", kind: "choice", applies: (description) => isParallel(description) || isRack(description),
     options: ["none", "helical", "herringbone"]
   },
   {
@@ -91,6 +93,10 @@ export const FIELDS = [
   {
     path: "/rim/radialThickness", group: "rim", schema: ["rimPlacement", "radialThickness"], applies: hasWeb,
     symbol: "T_r", unit: "mm"
+  },
+  {
+    path: "/rim/pitchHeight", group: "rim", schema: ["rackRim", "pitchHeight"], applies: isRack,
+    symbol: "H_p", unit: "mm"
   },
   {
     path: "/flanges/lower", group: "flanges", kind: "toggle"

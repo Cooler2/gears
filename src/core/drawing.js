@@ -28,6 +28,8 @@ const DRAWING_CHORD_ERROR = 0.005;
  */
 export function buildPlanView(normalized, derived) {
   const { kind, rim, web, flanges } = normalized;
+  // a rack is drawn from rack.js directly: it has no axis to cut across
+  if (kind === "rack") return null;
   const surface = kind === "idlerPulley" ? null : rimSurface(kind, rim, { outside: derived.outsideRadius }).points;
   const bevel = kind === "bevelGear";
   return {

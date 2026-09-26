@@ -2,6 +2,7 @@
 // Rims of the part kinds: the only part of the geometry that depends on `kind`.
 //
 // Everything inside the rim (web, hub, bore) and the flanges outside it are shared.
+// A rack has the fields of a gear rim but no axis: its geometry is in rack.js.
 // A rim kind gives four radii and the working surface: the outer loop of the rim
 // between its end faces.
 //   outside — the largest radius of the working surface; flanges start there;
@@ -22,16 +23,17 @@ export const RIM_FIELDS = {
   timingPulley: ["profile", "toothCount", "width", "radialThickness"],
   idlerPulley: ["outerDiameter", "width", "radialThickness"],
   gear: ["module", "toothCount", "pressureAngle", "profileShift", "backlash", "helix", "helixAngle", "width", "radialThickness"],
-  bevelGear: ["module", "toothCount", "mateToothCount", "shaftAngle", "pressureAngle", "profileShift", "backlash", "width", "radialThickness"]
+  bevelGear: ["module", "toothCount", "mateToothCount", "shaftAngle", "pressureAngle", "profileShift", "backlash", "width", "radialThickness"],
+  rack: ["module", "toothCount", "pressureAngle", "backlash", "helix", "helixAngle", "width", "pitchHeight"]
 };
 /** Kinds with involute teeth: they share the tooth fields and have no flanges. */
 export const GEAR_KINDS = ["gear", "bevelGear"];
 export const HELICES = ["none", "helical", "herringbone"];
 
-/** Fields of a rim; straight gear teeth have no helix angle. */
+/** Fields of a rim; straight teeth have no helix angle. */
 export function rimFields(kind, rim) {
   const fields = RIM_FIELDS[kind];
-  return kind === "gear" && rim?.helix === "none" ? fields.filter((field) => field !== "helixAngle") : fields;
+  return (kind === "gear" || kind === "rack") && rim?.helix === "none" ? fields.filter((field) => field !== "helixAngle") : fields;
 }
 
 /** Chord tolerance for a toothed outline measured without a mesh setting. */

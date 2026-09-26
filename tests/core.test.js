@@ -137,6 +137,7 @@ test("cross-field invalid examples return their documented diagnostics", async (
     "idler-no-interior.json": "E_RIM_NO_INTERIOR",
     "gear-thin-tooth.json": "E_GEAR_TOOTH_THIN",
     "bevel-too-wide.json": "E_BEVEL_WIDTH",
+    "rack-body.json": "E_RACK_BODY",
     "gear-flange.json": "E_SCHEMA_VALUE",
     "schema-extra-field.json": "E_SCHEMA_VALUE"
   };
@@ -709,6 +710,8 @@ test("every valid example builds a closed solid of the expected size", async () 
   const extraWarnings = { "trial-20t.json": ["W_THIN_FEATURE"] };
   for (const name of await exampleNames("valid")) {
     const input = await readJson(`../examples/valid/${name}`);
+    // racks have a test of their own below
+    if (input.kind === "rack") continue;
     const result = generatePulley(input);
     const toothed = input.kind === "timingPulley";
     const gear = input.kind === "gear";
@@ -750,6 +753,8 @@ test("examples lie flat on their lower face, and a solid one covers it completel
   for (const name of await exampleNames("valid")) {
     if (raised.has(name)) continue;
     const input = await readJson(`../examples/valid/${name}`);
+    // a rack lies on its side, a flat rectangle: nothing to cover
+    if (input.kind === "rack") continue;
     const result = generatePulley(input);
     const { derived, mesh } = result;
     const bottom = derived.faceLowerZ;
@@ -776,6 +781,82 @@ test("examples lie flat on their lower face, and a solid one covers it completel
     const expected = outline - contourArea(buildBoreContour(input.bore, error).points);
     assert.ok(Math.abs(area - expected) < 1e-9 * expected, `${name}: bottom area ${area} vs ${expected}`);
   }
+});
+
+test("a rack is a closed bar of N pitches with the volume of its section", async () => {
+  const rack = (rim) => ({ schemaVersion: 6, kind: "rack", units: "mm", rim: { module: 1, toothCount: 10, pressureAngle: 20, backlash: 0.1, helix: "none", width: 6, pitchHeight: 6, ...rim } });
+  const inputs = [
+    ...await Promise.all((await exampleNames("valid")).filter((name) => name.startsWith("rack-")).map((name) => readJson(`../examples/valid/${name}`))),
+    rack({ helix: "helical", helixAngle: -15 }),
+    rack({ helix: "herringbone", helixAngle: -30, toothCount: 7 }),
+    // the teeth lean farther than the whole rack is long
+    rack({ helix: "helical", helixAngle: 45, width: 50, toothCount: 3 })
+  ];
+  for (const input of inputs) {
+    const { rim } = input;
+    const name = JSON.stringify(rim);
+    const result = generatePulley(input);
+    assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.diagnostics)}`);
+    assert.deepEqual(result.diagnostics, [], name);
+    assert.deepEqual(result.verification.errors, [], name);
+    assert.equal(result.verification.connectedComponents, 1, name);
+    // straight from the contract: the transverse pitch, heights m and 1.25m from the pitch line
+    const beta = rim.helix === "none" ? 0 : rim.helixAngle * Math.PI / 180;
+    const pitch = Math.PI * rim.module / Math.cos(beta);
+    const length = rim.toothCount * pitch;
+    const { min, max } = result.mesh.bounds;
+    const close = (a, b) => Math.abs(a - b) < 1e-9;
+    assert.ok(close(min[0], -length / 2) && close(max[0], length / 2), `${name}: length`);
+    assert.ok(close(min[1], 0) && close(max[1], rim.pitchHeight + rim.module), `${name}: height`);
+    assert.ok(close(min[2], -rim.width / 2) && close(max[2], rim.width / 2), `${name}: width`);
+    // the section does not depend on z, only moves along X: the volume is the width times its area
+    const angle = Math.atan(Math.tan(rim.pressureAngle * Math.PI / 180) / Math.cos(beta));
+    const thickness = pitch / 2 - rim.backlash / Math.cos(beta);
+    const root = thickness / 2 + 1.25 * rim.module * Math.tan(angle);
+    const tip = thickness / 2 - rim.module * Math.tan(angle);
+    const area = length * (rim.pitchHeight - 1.25 * rim.module) + rim.toothCount * (root + tip) * 2.25 * rim.module;
+    assert.ok(Math.abs(result.verification.signedVolume - rim.width * area) < 1e-6 * rim.width * area, `${name}: volume ${result.verification.signedVolume} vs ${rim.width * area}`);
+  }
+});
+
+test("a right-hand rack has its teeth moving to −X upwards, a herringbone turns at the mid-plane", () => {
+  const rim = { module: 2, toothCount: 12, pressureAngle: 20, backlash: 0, width: 10, pitchHeight: 8 };
+  const pitch = (angle) => Math.PI * rim.module / Math.cos(angle * Math.PI / 180);
+  // the tip corners at height z, within the rack, as phases in [0, pitch)
+  const phases = (mesh, z, step) => {
+    const top = mesh.bounds.max[1];
+    const found = [];
+    for (let index = 0; index < mesh.vertices.length; index += 3) {
+      const [x, y, vz] = mesh.vertices.slice(index, index + 3);
+      if (Math.abs(y - top) < 1e-9 && Math.abs(vz - z) < 1e-9 && Math.abs(x) < mesh.bounds.max[0] - 1e-6) found.push(Math.round((((x % step) + step) % step) * 1e6) / 1e6);
+    }
+    return [...new Set(found)].sort((p, q) => p - q);
+  };
+  const moved = (list, by, step) => list.map((value) => Math.round((((value + by) % step + step) % step) * 1e6) / 1e6).sort((p, q) => p - q);
+  for (const [helix, angle] of [["helical", 20], ["helical", -20], ["herringbone", 30]]) {
+    const { mesh } = generatePulley({ schemaVersion: 6, kind: "rack", units: "mm", rim: { ...rim, helix, helixAngle: angle } });
+    const step = pitch(angle);
+    const lean = rim.width / 2 * Math.tan(angle * Math.PI / 180);
+    const bottom = phases(mesh, -rim.width / 2, step);
+    assert.equal(bottom.length, 2, `${helix} ${angle}: two tip corners per pitch`);
+    // helical: −z·tan β, the top face is the bottom one moved by −W·tan β; herringbone: |z|·tan β, the same at both faces
+    const expected = helix === "helical" ? moved(bottom, -2 * lean, step) : bottom;
+    const upper = phases(mesh, rim.width / 2, step);
+    assert.ok(upper.length === 2 && upper.every((value, index) => Math.abs(value - expected[index]) < 1e-5), `${helix} ${angle}: ${upper} vs ${expected}`);
+  }
+});
+
+test("rack diagnostics: pointed teeth, a thin body, a tooth thinned away, parts of a turning one", () => {
+  const input = (rim) => ({ schemaVersion: 6, kind: "rack", units: "mm", rim: { module: 1, toothCount: 10, pressureAngle: 20, backlash: 0.1, helix: "none", width: 6, pitchHeight: 6, ...rim } });
+  const codes = (rim) => validateDescription(input(rim)).diagnostics.map(({ code }) => code);
+  assert.deepEqual(codes({ module: 0.3, backlash: 0.4 }), ["W_RACK_POINTED"]);
+  assert.deepEqual(codes({ pitchHeight: 2.4 }), ["W_THIN_FEATURE"]);
+  assert.deepEqual(codes({ module: 0.3, backlash: 1 }), ["E_GEAR_TOOTH_THIN"]);
+  const body = validateDescription(input({ pitchHeight: 2 }));
+  assert.equal(body.ok, false);
+  assert.deepEqual(body.diagnostics[0].details, { thickness: 0.75, minimum: 1, minimumPitchHeight: 2.25 });
+  assert.equal(validateDescription({ ...input({}), hub: { outerDiameter: 10, lowerExtension: 0, upperExtension: 0 } }).ok, false);
+  assert.equal(validateDescription({ ...input({}), rim: { ...input({}).rim, profileShift: 0 } }).ok, false);
 });
 
 function farthestRadius({ vertices }) {
