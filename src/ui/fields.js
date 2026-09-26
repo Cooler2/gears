@@ -8,12 +8,12 @@
 // `schema: [def, property]` points at $defs[def].properties[property].
 
 import { T, resolve } from "./locale.js";
-import { hasWeb, isGear, isIdler, isInclined, isSpokes } from "./part.js";
+import { hasWeb, isBevel, isGear, isIdler, isInclined, isParallel, isSpokes } from "./part.js";
 
 // titles and texts come from the page language when asked for
 const kind = (id, extra = {}) => ({ id, ...extra, get title() { return T.kinds[id].title; }, get text() { return T.kinds[id].text; } });
 
-export const KINDS = [kind("timingPulley", { experimental: true }), kind("idlerPulley"), kind("gear")];
+export const KINDS = [kind("timingPulley", { experimental: true }), kind("idlerPulley"), kind("gear"), kind("bevelGear")];
 
 export function kindOf(description) {
   return KINDS.find(({ id }) => id === description?.kind) ?? KINDS[0];
@@ -44,13 +44,21 @@ const hasFlange = (side) => (description) => Boolean(description.flanges?.[side]
 
 export const FIELDS = [
   {
-    path: "/rim/module", group: "rim", schema: ["gearRim", "module"], applies: isGear,
+    path: "/rim/module", group: "rim", schema: (description) => [isBevel(description) ? "bevelRim" : "gearRim", "module"], applies: isGear,
     symbol: "m", unit: "mm"
   },
   {
-    path: "/rim/toothCount", group: "rim", schema: (description) => [isGear(description) ? "gearRim" : "timingRim", "toothCount"],
+    path: "/rim/toothCount", group: "rim", schema: (description) => [isBevel(description) ? "bevelRim" : isGear(description) ? "gearRim" : "timingRim", "toothCount"],
     applies: (description) => !isIdler(description),
     symbol: "N"
+  },
+  {
+    path: "/rim/mateToothCount", group: "rim", schema: ["bevelRim", "mateToothCount"], applies: isBevel,
+    symbol: "N_2"
+  },
+  {
+    path: "/rim/shaftAngle", group: "rim", schema: ["bevelRim", "shaftAngle"], applies: isBevel,
+    symbol: "Σ", unit: "deg"
   },
   {
     path: "/rim/pressureAngle", group: "rim", schema: ["gearRim", "pressureAngle"], applies: isGear,
@@ -65,7 +73,7 @@ export const FIELDS = [
     symbol: "j", unit: "mm"
   },
   {
-    path: "/rim/helix", group: "rim", kind: "choice", applies: isGear,
+    path: "/rim/helix", group: "rim", kind: "choice", applies: isParallel,
     options: ["none", "helical", "herringbone"]
   },
   {

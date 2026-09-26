@@ -97,27 +97,34 @@ export function gearGeometry(rim) {
  * rim never reaches the mesh.
  */
 export function buildGearContour(rim, maxChordError) {
-  const gear = gearGeometry(rim);
   const { toothCount } = rim;
-  const space = Math.PI / toothCount; // tooth centre to space centre
+  const tooth = gearToothOutline(gearGeometry(rim), Math.PI / toothCount, maxChordError);
+  const points = [];
+  for (let index = 0; index < toothCount; index += 1) {
+    const turn = 2 * Math.PI * index / toothCount;
+    for (const [radius, angle] of tooth) points.push([radius * Math.sin(angle + turn), radius * Math.cos(angle + turn)]);
+  }
+  return points;
+}
+
+/**
+ * One pitch of the outline as [radius, angle] pairs, clockwise from the tip of the
+ * tooth on +Y (angle 0) to just before the tip of the next one (angle 2·space).
+ * space is the angle from a tooth centre to the next space centre, π/N; the tooth
+ * count need not be whole, as for the virtual gear of a bevel gear.
+ */
+export function gearToothOutline(gear, space, maxChordError) {
   const flankTop = Math.max(gear.tip, gear.flankStart);
   const rootAngle = Math.min(gear.halfAngle(gear.flankStart), space);
   const tipAngle = Math.max(0, Math.min(gear.halfAngle(flankTop), rootAngle));
 
-  // half a tooth, from the tooth centre to just before the space centre, as [radius, angle]
+  // half a tooth, from the tooth centre to just before the space centre
   const half = [];
   arc(gear.tip, 0, tipAngle, false, half);
   for (const radius of flankRadii(gear, flankTop, maxChordError)) half.push([radius, Math.min(gear.halfAngle(radius), rootAngle)]);
   if (gear.base > gear.root) half.push([gear.root, rootAngle]);
   arc(gear.root, rootAngle, space, true, half);
-
-  const tooth = [...half, [gear.root, space], ...half.slice(1).reverse().map(([radius, angle]) => [radius, 2 * space - angle])];
-  const points = [];
-  for (let index = 0; index < toothCount; index += 1) {
-    const turn = 2 * space * index;
-    for (const [radius, angle] of tooth) points.push([radius * Math.sin(angle + turn), radius * Math.cos(angle + turn)]);
-  }
-  return points;
+  return [...half, [gear.root, space], ...half.slice(1).reverse().map(([radius, angle]) => [radius, 2 * space - angle])];
 
   /** Points of an arc from `from` towards `to`, without the end; skipStart drops the first one too. */
   function arc(radius, from, to, skipStart, target) {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildPlanView, validateDescription } from "../src/core/generate.js";
-import { chordSummary, renderChord, renderHelix, renderPlan, renderSection, renderTooth } from "../src/ui/drawings.js";
+import { chordSummary, renderChord, renderCone, renderHelix, renderPlan, renderSection, renderTooth } from "../src/ui/drawings.js";
 import { FIELD_BY_PATH, FIELDS, GROUPS, KINDS, fieldHint, fieldLabel, fieldSchema, fieldsOf, groupOfPath, groupsOf, groupTitle } from "../src/ui/fields.js";
 import { formatCount, formatNumber, inputText, splitSymbol } from "../src/ui/format.js";
 import { LOCALES, setLanguage } from "../src/ui/locale.js";
@@ -77,8 +77,11 @@ test("each visible numeric field has a dimension on the drawings of its group", 
     assert.equal(model.ok, true, name);
     for (const { id: group } of groupsOf(model.normalized).filter(({ id }) => id !== "presets")) {
       const ctx = contextFor(model, group);
-      const teeth = group === "rim" && model.normalized.kind === "gear";
-      const drawings = [renderPlan(model, ctx), renderSection(model, ctx), group === "generation" ? renderChord(model, ctx) : "", teeth ? renderTooth(model, ctx) : "", teeth ? renderHelix(model, ctx) : ""].map(dimensionPaths);
+      const { kind } = model.normalized;
+      const teeth = group === "rim" && (kind === "gear" || kind === "bevelGear");
+      // gears on parallel shafts show their helices from the side, bevel gears the pitch cones of the pair
+      const side = !teeth ? "" : kind === "gear" ? renderHelix(model, ctx) : renderCone(model, ctx);
+      const drawings = [renderPlan(model, ctx), renderSection(model, ctx), group === "generation" ? renderChord(model, ctx) : "", teeth ? renderTooth(model, ctx) : "", side].map(dimensionPaths);
       const drawn = drawings.flat();
       const expected = [...ctx.visible].filter((path) => numeric(FIELDS.find((field) => field.path === path)));
       // a size may appear on both views (the diameters do), but once per view

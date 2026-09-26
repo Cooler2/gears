@@ -8,8 +8,11 @@
 //   root    — the smallest one; the rim body of radialThickness lies inside it;
 //   pitch   — the pitch radius of a toothed rim, null when there is none;
 //   base    — the base circle of an involute gear, null for the pulleys.
+// A bevel gear narrows upwards: outside is its tip circle in the lower face and
+// root the root circle of the small end, the smallest one under the teeth.
 
 import { buildGt2Contour, buildMarkedCircle, circleSegmentCount, rotateContour } from "./contours.js";
+import { bevelGeometry, buildBevelContour } from "./bevel.js";
 import { buildGearContour, gearGeometry, helixAngleOf } from "./involute.js";
 
 /** Index of the first groove centre in buildGt2Contour: it lies on the +Y ray. */
@@ -18,8 +21,11 @@ const PROFILE_START = 9;
 export const RIM_FIELDS = {
   timingPulley: ["profile", "toothCount", "width", "radialThickness"],
   idlerPulley: ["outerDiameter", "width", "radialThickness"],
-  gear: ["module", "toothCount", "pressureAngle", "profileShift", "backlash", "helix", "helixAngle", "width", "radialThickness"]
+  gear: ["module", "toothCount", "pressureAngle", "profileShift", "backlash", "helix", "helixAngle", "width", "radialThickness"],
+  bevelGear: ["module", "toothCount", "mateToothCount", "shaftAngle", "pressureAngle", "profileShift", "backlash", "width", "radialThickness"]
 };
+/** Kinds with involute teeth: they share the tooth fields and have no flanges. */
+export const GEAR_KINDS = ["gear", "bevelGear"];
 export const HELICES = ["none", "helical", "herringbone"];
 
 /** Fields of a rim; straight gear teeth have no helix angle. */
@@ -43,6 +49,10 @@ export function rimRadii(kind, rim) {
     const gear = gearGeometry(rim);
     return { pitch: gear.pitch, outside: gear.tip, root: gear.root, base: gear.base };
   }
+  if (kind === "bevelGear") {
+    const bevel = bevelGeometry(rim);
+    return { pitch: bevel.pitch, outside: bevel.tip, root: bevel.root * bevel.scaleAt(rim.width), base: null };
+  }
   const outside = rim.outerDiameter / 2;
   return { pitch: null, outside, root: outside, base: null };
 }
@@ -62,8 +72,9 @@ export function rimSizePath(kind) {
  * points is the section at the mid-plane z = 0. sections lists the levels from
  * the lower rim end to the upper one with the clockwise turn of that section;
  * the working surface is built between neighbouring sections. Straight teeth
- * and smooth rims have just the two ends without a turn. The marks cover both
- * end sections, which the rim end rings join.
+ * and smooth rims have just the two ends without a turn. A section may also have a
+ * scale: the contour shrunk towards the axis, as the small end of a bevel gear.
+ * The marks cover both end sections, which the rim end rings join.
  */
 export function rimSurface(kind, rim, radii, maxChordError = MEASURE_CHORD_ERROR) {
   const ends = [{ z: -rim.width / 2, turn: 0 }, { z: rim.width / 2, turn: 0 }];
@@ -76,6 +87,11 @@ export function rimSurface(kind, rim, radii, maxChordError = MEASURE_CHORD_ERROR
     const sections = helixSections(rim, points, maxChordError);
     const endTurns = [...new Set([sections[0].turn, sections.at(-1).turn])];
     return { points, marks: endTurns.flatMap((turn) => toothMarks().map((mark) => mark + turn)), sections };
+  }
+  if (kind === "bevelGear") {
+    // the tooth lines are straight and run to the apex, so one band between the ends is exact
+    const scale = bevelGeometry(rim).scaleAt(rim.width);
+    return { points: buildBevelContour(rim, maxChordError), marks: toothMarks(), sections: [ends[0], { ...ends[1], scale }] };
   }
   return { points: buildMarkedCircle(radii.outside, circleSegmentCount(radii.outside, maxChordError)).points, marks: [], sections: ends };
 }

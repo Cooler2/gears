@@ -14,7 +14,9 @@ const DRAWING_CHORD_ERROR = 0.005;
  * millimetres, +Y up, angles clockwise from +Y.
  *
  * profile is the toothed working surface, null for a smooth rim: that one is the
- * circle radii.outside. bore is the bore outline with the same orientation as the mesh loop: the flat,
+ * circle radii.outside. The plan looks down on the part, so a bevel gear shows the
+ * outline of its small end as profile, and its large end below it as
+ * profileBeyond (null for other kinds); its pitch circle lies in neither. bore is the bore outline with the same orientation as the mesh loop: the flat,
  * the keyway and one polygon side face +X.
  *
  * spokes is null for a solid web. Each spoke outline is a closed polygon from the
@@ -26,8 +28,11 @@ const DRAWING_CHORD_ERROR = 0.005;
  */
 export function buildPlanView(normalized, derived) {
   const { kind, rim, web, flanges } = normalized;
+  const surface = kind === "idlerPulley" ? null : rimSurface(kind, rim, { outside: derived.outsideRadius }).points;
+  const bevel = kind === "bevelGear";
   return {
-    profile: kind === "idlerPulley" ? null : rimSurface(kind, rim, { outside: derived.outsideRadius }).points,
+    profile: bevel ? surface.map(([x, y]) => [x * derived.endScale, y * derived.endScale]) : surface,
+    profileBeyond: bevel ? surface : null,
     bore: buildBoreContour(normalized.bore, DRAWING_CHORD_ERROR).points,
     radii: {
       bore: derived.boreRadius,
@@ -35,7 +40,7 @@ export function buildPlanView(normalized, derived) {
       rimInner: derived.rimInnerRadius,
       root: derived.rootRadius,
       outside: derived.outsideRadius,
-      pitch: derived.pitchRadius
+      pitch: bevel ? null : derived.pitchRadius
     },
     flangeRadii: {
       lower: flanges.lower ? derived.lowerFlangeOuterRadius : null,
