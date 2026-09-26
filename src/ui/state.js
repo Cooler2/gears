@@ -17,7 +17,10 @@ export function defaultDescription(schema, kind = "timingPulley") {
   const rims = {
     timingPulley: () => ({ profile: schema.$defs.timingRim.properties.profile.const, toothCount: value("timingRim", "toothCount") }),
     idlerPulley: () => ({ outerDiameter: value("idlerRim", "outerDiameter") }),
-    gear: () => Object.fromEntries(["module", "toothCount", "pressureAngle", "profileShift", "backlash", "helix"].map((field) => [field, value("gearRim", field)]))
+    gear: () => Object.fromEntries(["module", "toothCount", "pressureAngle", "profileShift", "backlash", "helix"].map((field) => [field, value("gearRim", field)])),
+    // the tooth fields a bevel gear shares with a gear are references to the gear ones
+    bevelGear: () => Object.fromEntries(["module", "toothCount", "mateToothCount", "shaftAngle", "pressureAngle", "profileShift", "backlash"]
+      .map((field) => [field, value(Object.hasOwn(schema.$defs.bevelRim.properties[field], "$ref") ? "gearRim" : "bevelRim", field)]))
   };
   const rim = rims[kind]();
   return {

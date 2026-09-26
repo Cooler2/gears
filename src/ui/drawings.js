@@ -11,7 +11,8 @@
 // group; regions that explain a switch (flange, web type) also carry data-path.
 
 import { circleSegmentCount } from "../core/contours.js";
-import { buildGearContour, gearGeometry } from "../core/involute.js";
+import { bevelGeometry } from "../core/bevel.js";
+import { buildGearContour, gearGeometry, gearToothOutline } from "../core/involute.js";
 import { helixTurn } from "../core/rims.js";
 import { FIELD_BY_PATH, fieldLabel, fieldUnit } from "./fields.js";
 import { escapeHtml, formatNumber, splitSymbol } from "./format.js";
@@ -135,6 +136,7 @@ export function renderPlan(model, ctx) {
     if (radius) out.push(part(ctx, "flanges", circlePath(radius), { path: `/flanges/${side}`, extra: "part-beyond" }));
   }
   const rimInner = Math.max(r.rimInner, 0);
+  if (plan.profileBeyond) out.push(part(ctx, "rim", polygonPath(plan.profileBeyond), { extra: "part-beyond" }));
   const surface = plan.profile ? polygonPath(plan.profile) : circlePath(r.outside);
   out.push(part(ctx, "rim", surface + (rimInner > 0 ? circlePath(rimInner) : "")));
   if (plan.spokes) {
@@ -172,7 +174,7 @@ export function renderPlan(model, ctx) {
   }
 
   // T_r to the lower right, along a groove of a pulley or a space between gear teeth
-  const spaceOffset = normalized.kind === "gear" ? Math.PI / rim.toothCount : 0;
+  const spaceOffset = normalized.kind === "timingPulley" ? 0 : Math.PI / rim.toothCount;
   const rimAngle = toothed ? 2 * Math.PI * Math.round(rim.toothCount * 3 / 8) / rim.toothCount + spaceOffset : 3 * Math.PI / 4;
   const rimDirection = polar(1, rimAngle);
   out.push(dimension(ctx, "/rim/radialThickness", {
@@ -297,7 +299,9 @@ function spokeDimensions(ctx, plan, web, u, outer) {
  * pressure angle are larger than the normal ones the fields hold.
  */
 export function renderTooth(model, ctx) {
-  const { rim } = model.normalized;
+  // a bevel gear shows its virtual gear: the teeth of the large end unrolled from the back cone
+  const bevel = model.normalized.kind === "bevelGear";
+  const rim = bevel ? bevelGeometry(model.normalized.rim).virtualRim : model.normalized.rim;
   const gear = gearGeometry(rim);
   const nominal = gearGeometry({ ...rim, backlash: 0 });
   const inclined = gear.helix > 0;
@@ -312,7 +316,8 @@ export function renderTooth(model, ctx) {
   const angleOf = ([x, y]) => Math.atan2(x, y);
 
   // pitch circle dash-dotted; with a shift the rack datum line dashed
-  const inside = [part(ctx, "rim", polygonPath(model.plan.profile)), `<path class="pitch-line" d="${circlePath(gear.pitch)}"/>`];
+  const profile = bevel ? virtualTeeth(gear, rim, step) : model.plan.profile;
+  const inside = [part(ctx, "rim", polygonPath(profile)), `<path class="pitch-line" d="${circlePath(gear.pitch)}"/>`];
   if (rim.profileShift !== 0) inside.push(`<path class="nominal-line" d="${circlePath(gear.pitch + rim.profileShift * m)}"/>`);
   if (rim.backlash > 0) {
     // the central tooth without thinning, dashed, from its left root to its right root
@@ -375,6 +380,19 @@ export function renderTooth(model, ctx) {
   return svgRoot(box, u, out.join(""), T.drawings.tooth, defs);
 }
 
+/**
+ * The teeth of a virtual gear around the one on +Y, closed through the centre: its
+ * tooth count need not be whole, and the tooth view shows only a few of them.
+ */
+function virtualTeeth(gear, rim, step) {
+  const tooth = gearToothOutline(gear, step / 2, 0.005 * rim.module);
+  const points = [[0, 0]];
+  for (let index = -3; index <= 3; index += 1) {
+    for (const [radius, angle] of tooth) points.push(polar(radius, angle + index * step));
+  }
+  return points;
+}
+
 // -------------------------------------------------------------- helix view
 
 /**
@@ -431,6 +449,89 @@ export function renderHelix(model, ctx) {
   return svgRoot(box, u, out.join(""), T.drawings.helix);
 }
 
+// --------------------------------------------------------------- cone view
+
+/**
+ * The pitch cones of a bevel pair in the axial section through the common apex:
+ * this gear with its teeth cut, the pitch cone of the mating gear dashed, the
+ * shaft angle Σ between the axes and the pitch diameter of the mating gear, mN₂.
+ */
+export function renderCone(model, ctx) {
+  const { rim } = model.normalized;
+  const { derived, anchors } = model;
+  const r = anchors.radii;
+  const z = anchors.zLevels;
+  const degree = Math.PI / 180;
+  const cone = derived.pitchConeAngle * degree;
+  const shaft = rim.shaftAngle * degree;
+  const apex = [0, derived.apexZ];
+  // directions from the apex, measured from this gear's axis pointing away from the apex, towards +X
+  const ray = (angle) => [Math.sin(angle), -Math.cos(angle)];
+  const distance = derived.coneDistance;
+  const pitchPoint = (angle) => add(apex, mul(ray(angle), distance));
+  // the mating gear shares the pitch line at +δ; its axis is at Σ, its other pitch line at Σ + δ₂
+  const mateOuter = shaft + derived.mateConeAngle * degree;
+  const [shared, mateFar] = [pitchPoint(cone), pitchPoint(mateOuter)];
+  const points = [pitchPoint(-cone), shared, mateFar, apex, [r.outside, z.rimLower], [-r.outside, z.rimLower]];
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const u = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) / 19;
+
+  const scale = derived.endScale;
+  const teeth = [];
+  const body = [];
+  for (const side of [1, -1]) {
+    const outline = (list) => polygonPath(list.map(([x, level]) => [side * x, level]));
+    teeth.push(outline([[r.root / scale, z.rimLower], [r.outside, z.rimLower], [r.outside * scale, z.rimUpper], [r.root, z.rimUpper]]));
+    body.push(outline([[Math.max(r.rimInner, 0), z.rimLower], [r.root / scale, z.rimLower], [r.root, z.rimUpper], [Math.max(r.rimInner, 0), z.rimUpper]]));
+  }
+  const out = [part(ctx, "rim", teeth.join(""), { extra: "part-teeth" }), part(ctx, "rim", body.join(""))];
+  const beyond = (point, extra) => add(point, mul(unit(sub(point, apex)), extra));
+  out.push(`<path class="pitch-line" d="M${P(beyond(pitchPoint(-cone), 0.8 * u))}L${P(apex)}L${P(beyond(shared, 0.8 * u))}"/>`);
+  out.push(`<path class="nominal-line" d="M${P(apex)}L${P(mateFar)}L${P(shared)}"/>`);
+  const axisEnd = (angle, length) => add(apex, mul(ray(angle), length));
+  const mateAxis = distance * Math.cos(derived.mateConeAngle * degree) + u;
+  out.push(`<path class="centre-line" d="M${P(add(apex, [0, u]))}L${P([0, Math.min(z.rimLower, pitchPoint(cone)[1]) - u])}` +
+    `M${P(axisEnd(shaft, -u))}L${P(axisEnd(shaft, mateAxis))}"/>`);
+  out.push(`<path class="dim-dot" d="${circlePath(0.15 * u, apex)}"/>`);
+  out.push(`<text class="note" x="${f(apex[0] - 0.6 * u)}" y="${f(-(apex[1] + 0.6 * u))}" text-anchor="end">${T.drawings.apex}</text>`);
+  // the mating gear is named inside its cone, beside its axis on the far side: its large end carries N₂
+  const mateNote = add(axisEnd(shaft, 0.6 * (mateAxis - u)), mul(unit(sub(mateFar, shared)), 0.7 * u));
+  out.push(`<text class="note" x="${f(mateNote[0])}" y="${f(-mateNote[1])}" text-anchor="middle" dominant-baseline="middle">${T.drawings.mate}</text>`);
+
+  // δ: a note left of the axis for the arc between the axis and the pitch line; it is computed, not entered
+  const arcOf = (from, to, radius) => Array.from({ length: 13 }, (_, index) => add(apex, mul(ray(from + (to - from) * index / 12), radius)));
+  const coneArc = arcOf(0, cone, 2.6 * u);
+  const coneLabel = add(apex, [-0.5 * u, -2.2 * u]);
+  out.push(`<path class="dim-ext" d="M${coneArc.map(P).join("L")}"/>`);
+  out.push(`<text class="note" x="${f(coneLabel[0])}" y="${f(-coneLabel[1])}" text-anchor="end" dominant-baseline="middle">δ = ${escapeHtml(formatNumber(derived.pitchConeAngle))}°</text>`);
+
+  // Σ: an arc between the two axes, larger than the δ one
+  const shaftArc = arcOf(0, shaft, 4.2 * u);
+  const shaftPath = `M${shaftArc.map(P).join("L")}`;
+  const shaftLabel = add(apex, mul(ray(shaft / 2), 5.4 * u));
+  out.push(wrap(ctx, "/rim/shaftAngle", rim.shaftAngle,
+    `<path class="dim-line" d="${shaftPath}"/><path class="dim-hit" d="${shaftPath}"/>` +
+    arrowhead(shaftArc[0], unit(sub(shaftArc[0], shaftArc[1])), 0.5 * u) + arrowhead(shaftArc[12], unit(sub(shaftArc[12], shaftArc[11])), 0.5 * u) +
+    labelMarkup("/rim/shaftAngle", rim.shaftAngle, shaftLabel, "start")));
+
+  // N₂: across the large end of the mating gear, where its pitch diameter is mN₂
+  const across = unit(sub(mateFar, shared));
+  const offset = mul(unit(sub(mul(add(mateFar, shared), 0.5), apex)), 1.2 * u);
+  const [from, to] = [add(shared, offset), add(mateFar, offset)];
+  const middle = mul(add(from, to), 0.5);
+  const labelAt = add(middle, mul(unit(offset), 1.8 * u));
+  out.push(dimension(ctx, "/rim/mateToothCount", {
+    u, a: from, b: to, value: rim.mateToothCount,
+    ext: [[shared, add(from, mul(unit(offset), 0.4 * u))], [mateFar, add(to, mul(unit(offset), 0.4 * u))]],
+    label: labelAt, anchor: across[0] >= 0 ? "start" : "end",
+    extra: `<text class="note" x="${f(labelAt[0])}" y="${f(-(labelAt[1] - 1.1 * u))}" text-anchor="${across[0] >= 0 ? "start" : "end"}">mN₂ = ${escapeHtml(formatNumber(rim.module * rim.mateToothCount))}</text>`
+  }));
+
+  const box = [Math.min(...xs) - 8 * u, -(Math.max(...ys) + 6 * u), Math.max(...xs) - Math.min(...xs) + 16 * u, Math.max(...ys) - Math.min(...ys) + 12 * u];
+  return svgRoot(box, u, out.join(""), T.drawings.cone);
+}
+
 // ------------------------------------------------------------- section view
 
 /** Axial section through the axis (XZ plane), both halves; spokes are cut along a spoke. */
@@ -446,11 +547,14 @@ export function renderSection(model, ctx) {
   const rimInner = Math.max(r.rimInner, 0);
   const spokes = normalized.web.type === "spokes";
 
+  // a bevel gear narrows towards its apex: r.root is the root of its small end, the upper one
+  const scale = derived.endScale;
   const rects = { rim: [], teeth: [], flanges: { lower: [], upper: [] }, web: [], hub: [] };
   for (const side of [1, -1]) {
     const box = (x0, z0, x1, z1) => rectPath(side * x0, z0, side * x1, z1);
-    if (r.root < r.outside) rects.teeth.push(box(r.root, z.rimLower, r.outside, z.rimUpper));
-    rects.rim.push(box(rimInner, z.rimLower, r.root, z.rimUpper));
+    const outline = (points) => polygonPath(points.map(([x, level]) => [side * x, level]));
+    if (r.root < r.outside) rects.teeth.push(outline([[r.root / scale, z.rimLower], [r.outside, z.rimLower], [r.outside * scale, z.rimUpper], [r.root, z.rimUpper]]));
+    rects.rim.push(outline([[rimInner, z.rimLower], [r.root / scale, z.rimLower], [r.root, z.rimUpper], [rimInner, z.rimUpper]]));
     if (z.lowerFlange !== null) rects.flanges.lower.push(box(rimInner, z.lowerFlange, flangeRadius.lower, z.rimLower));
     if (z.upperFlange !== null) rects.flanges.upper.push(box(rimInner, z.rimUpper, flangeRadius.upper, z.upperFlange));
     if (rimInner > r.hub) rects.web.push(box(r.hub, z.webLower, rimInner, z.webUpper));
@@ -479,7 +583,7 @@ export function renderSection(model, ctx) {
   const column = outer + 1.5 * u;
   const chain = [
     ["/flanges/lower/axialThickness", z.lowerFlange, z.rimLower, flanges.lower?.axialThickness, flangeRadius.lower, r.outside],
-    ["/rim/width", z.rimLower, z.rimUpper, rim.width, r.outside, r.outside],
+    ["/rim/width", z.rimLower, z.rimUpper, rim.width, r.outside, r.outside * scale],
     ["/flanges/upper/axialThickness", z.rimUpper, z.upperFlange, flanges.upper?.axialThickness, r.outside, flangeRadius.upper]
   ];
   for (const [path, z0, z1, value, x0, x1] of chain) {

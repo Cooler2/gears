@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gears.local/schemas/pulley-v5.schema.json",
   "title": "Gears pulley description, version 5",
-  "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley or an involute gear with straight, helical or herringbone teeth. Cross-field geometry rules are defined in docs/contract.md.",
+  "description": "Static structure and scalar limits of a GT2 timing pulley, a smooth idler pulley, an involute gear with straight, helical or herringbone teeth, or a straight bevel gear. Cross-field geometry rules are defined in docs/contract.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,8 +22,8 @@
       "description": "Major version of the persisted input format. Version 1 kept a round bore as hub.boreDiameter, versions 1 and 2 called rim.width toothedWidth and had timing pulleys only, version 3 added the idler pulley and the spur gear but placed the web by thickness and mid-plane and measured hub extensions from the rim ends; readers upgrade them. Version 4 placed the web and the hub against the faces of the part. Version 5 renames spurGear to gear and adds helical teeth; a version 4 gear gets rim.helix \"none\"."
     },
     "kind": {
-      "enum": ["timingPulley", "idlerPulley", "gear"],
-      "description": "Part kind; it selects the rim. Flanges (absent on a gear), web, hub and bore are shared."
+      "enum": ["timingPulley", "idlerPulley", "gear", "bevelGear"],
+      "description": "Part kind; it selects the rim. Flanges (absent on gears), web, hub and bore are shared."
     },
     "units": {
       "const": "mm",
@@ -33,7 +33,8 @@
       "oneOf": [
         { "$ref": "#/$defs/timingRim" },
         { "$ref": "#/$defs/idlerRim" },
-        { "$ref": "#/$defs/gearRim" }
+        { "$ref": "#/$defs/gearRim" },
+        { "$ref": "#/$defs/bevelRim" }
       ]
     },
     "flanges": {
@@ -79,6 +80,15 @@
       "then": {
         "properties": {
           "rim": { "$ref": "#/$defs/gearRim" },
+          "flanges": { "properties": { "lower": { "type": "null" }, "upper": { "type": "null" } } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "bevelGear" } } },
+      "then": {
+        "properties": {
+          "rim": { "$ref": "#/$defs/bevelRim" },
           "flanges": { "properties": { "lower": { "type": "null" }, "upper": { "type": "null" } } }
         }
       }
@@ -194,6 +204,47 @@
           "default": 20,
           "description": "Helix angle β at the pitch cylinder, degrees; present only when helix is not none. Positive is right-hand: the tooth rises counter-clockwise seen from +Z, like a right-hand thread; a herringbone takes the hand of its lower half. Mating gears on parallel axes have opposite signs; 0 gives straight teeth."
         },
+        "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
+        "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }
+      }
+    },
+    "bevelRim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "toothCount", "mateToothCount", "shaftAngle", "pressureAngle", "profileShift", "backlash", "width", "radialThickness"],
+      "description": "Straight bevel gear: the teeth lie on the pitch cone and every tooth line runs to its apex. Tooth sizes are those of the large end, which is the lower face; the teeth are those of the virtual spur gear on the back cone with toothCount/cos δ teeth (Tredgold's approximation). The lower face passes through the tip circle of the large end, the upper face is width higher; the small end is the large one scaled towards the apex.",
+      "properties": {
+        "module": {
+          "type": "number",
+          "minimum": 0.3,
+          "maximum": 10,
+          "default": 2,
+          "description": "Module m of the large end, mm: the pitch diameter of the large end is m·toothCount, the circular pitch along it π·m. Mating gears share the module and the pressure angle."
+        },
+        "toothCount": {
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 200,
+          "default": 20,
+          "description": "Number of teeth of this gear."
+        },
+        "mateToothCount": {
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 200,
+          "default": 30,
+          "description": "Number of teeth of the mating bevel gear. With the shaft angle Σ it sets the pitch cone angle δ: tan δ = sin Σ / (mateToothCount/toothCount + cos Σ). The mating gear has the two counts swapped."
+        },
+        "shaftAngle": {
+          "type": "number",
+          "minimum": 30,
+          "maximum": 150,
+          "default": 90,
+          "description": "Angle Σ between the axes of the pair, degrees; both gears of a pair have the same. The pitch cone angles of the pair add up to Σ."
+        },
+        "pressureAngle": { "$ref": "#/$defs/gearRim/properties/pressureAngle" },
+        "profileShift": { "$ref": "#/$defs/gearRim/properties/profileShift" },
+        "backlash": { "$ref": "#/$defs/gearRim/properties/backlash" },
         "width": { "$ref": "#/$defs/rimPlacement/properties/width" },
         "radialThickness": { "$ref": "#/$defs/rimPlacement/properties/radialThickness" }
       }
